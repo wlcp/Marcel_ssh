@@ -95,16 +95,33 @@ settings	llmConfig / vision	local
 settings	llmRegistry / channels / (顺序)	shared
 settings	llmRegistry / channels / * / baseUrl	shared
 settings	llmRegistry / channels / * / enabled	shared
+settings	llmRegistry / channels / * / headers / X-Title	local
 settings	llmRegistry / channels / * / id	shared
-settings	llmRegistry / channels / * / kind	shared
-settings	llmRegistry / channels / * / models / (顺序)	shared
-settings	llmRegistry / channels / * / models / * / contextWindow	shared
-settings	llmRegistry / channels / * / models / * / id	shared
-settings	llmRegistry / channels / * / models / * / maxOutputTokens	shared
-settings	llmRegistry / channels / * / models / * / modelName	shared
-settings	llmRegistry / channels / * / models / * / name	shared
+settings	llmRegistry / channels / * / modelsUrl	shared
 settings	llmRegistry / channels / * / name	shared
-settings	llmRegistry / version	shared
+settings	llmRegistry / channels / * / preset	shared
+settings	llmRegistry / channels / * / sessionHeader	shared
+settings	llmRegistry / lastUsedModelId	shared
+settings	llmRegistry / models / (顺序)	shared
+settings	llmRegistry / models / * / channelId	shared
+settings	llmRegistry / models / * / contextWindow	shared
+settings	llmRegistry / models / * / demoteNonLeadingSystem	shared
+settings	llmRegistry / models / * / displayName	shared
+settings	llmRegistry / models / * / extraBody	shared
+settings	llmRegistry / models / * / id	shared
+settings	llmRegistry / models / * / modelName	shared
+settings	llmRegistry / models / * / reasoningEfforts	shared
+settings	llmRegistry / models / * / temperature	shared
+settings	llmRegistry / models / * / vision	shared
+settings	llmRegistry / netPolicy / firstByteTimeoutSecs	shared
+settings	llmRegistry / netPolicy / maxRetries	shared
+settings	llmRegistry / netPolicy / retryDelaySecs	shared
+settings	llmRegistry / netPolicy / retryHttpStatuses	shared
+settings	llmRegistry / netPolicy / retryOnTimeout	shared
+settings	llmRegistry / slots / memoryModelId	shared
+settings	llmRegistry / slots / modelApprovalModelId	shared
+settings	llmRegistry / slots / summarizerModelId	shared
+settings	llmRegistry / subagentModels	shared
 settings	memorySettings / autoReflect	shared
 settings	memorySettings / enabled	shared
 settings	mobileBackgroundSettings / keepAlive	local
