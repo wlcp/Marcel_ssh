@@ -24,9 +24,9 @@ val keyProperties = Properties().apply {
 
 android {
     compileSdk = 36
-    // namespace（Kotlin 包 / R 类 / manifest 相对类名解析）保持不变，
-    // 只换 applicationId：同一台机器上可与官方版共存，互不覆盖。
-    namespace = "com.marcel.ssh"
+    // 独立版本线：namespace / applicationId / Kotlin 包一起换；
+    // Tauri 会按 identifier 校验 java 目录是否存在，三者必须一致。
+    namespace = "com.wlcp.marcel"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "com.wlcp.marcel"

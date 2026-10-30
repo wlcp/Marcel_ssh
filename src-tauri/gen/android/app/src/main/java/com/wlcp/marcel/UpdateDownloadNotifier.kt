@@ -1,4 +1,4 @@
-package com.marcel.ssh
+package com.wlcp.marcel
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

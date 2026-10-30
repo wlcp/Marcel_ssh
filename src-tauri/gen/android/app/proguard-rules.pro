@@ -28,7 +28,7 @@
 # 「应用内更新（由 Rust 侧 JNI 调用）」段）。
 #
 # 这些方法不是 native 声明，wry 自动生成的 proguard-wry.pro 里
-# `-keep class com.marcel.ssh.* { native <methods>; }` 覆盖不到，于是
+# `-keep class com.wlcp.marcel.* { native <methods>; }` 覆盖不到，于是
 # release 构建（isMinifyEnabled = true）里 R8 会把它们整个删掉 —— 是删除
 # 不是改名，mapping.txt 里查无此名、usage.txt 里列着它们。运行时表现为
 # NoSuchMethodError，前端只看到一句
@@ -40,7 +40,7 @@
 # `()Ljava/lang/String;` 和 `(Ljava/lang/String;)Ljava/lang/String;` 两种签名，
 # 正好被这两条覆盖，所以新增同契约的方法不需要再动本文件。若要暴露别的签名
 # （非 String 返回值、多参数），必须在这里补对应规则。
--keep class com.marcel.ssh.MainActivity {
+-keep class com.wlcp.marcel.MainActivity {
     public java.lang.String *(java.lang.String);
     public java.lang.String *();
 }

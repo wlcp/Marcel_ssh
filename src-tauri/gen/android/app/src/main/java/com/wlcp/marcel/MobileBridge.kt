@@ -1,4 +1,4 @@
-package com.marcel.ssh
+package com.wlcp.marcel
 
 import android.Manifest
 import android.content.pm.PackageManager

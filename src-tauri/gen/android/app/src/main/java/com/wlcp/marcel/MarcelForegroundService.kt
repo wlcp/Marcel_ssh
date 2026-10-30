@@ -1,4 +1,4 @@
-package com.marcel.ssh
+package com.wlcp.marcel
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -31,11 +31,11 @@ class MarcelForegroundService : Service() {
         const val CHANNEL_AGENT = "marcel_agent"
         const val NOTIFICATION_ID_SERVICE = 1
 
-        const val ACTION_START = "com.marcel.ssh.action.START"
-        const val ACTION_UPDATE = "com.marcel.ssh.action.UPDATE"
-        const val ACTION_STOP = "com.marcel.ssh.action.STOP"
-        const val ACTION_NOTIFY = "com.marcel.ssh.action.NOTIFY"
-        const val ACTION_RESTORE = "com.marcel.ssh.action.RESTORE"
+        const val ACTION_START = "com.wlcp.marcel.action.START"
+        const val ACTION_UPDATE = "com.wlcp.marcel.action.UPDATE"
+        const val ACTION_STOP = "com.wlcp.marcel.action.STOP"
+        const val ACTION_NOTIFY = "com.wlcp.marcel.action.NOTIFY"
+        const val ACTION_RESTORE = "com.wlcp.marcel.action.RESTORE"
         const val EXTRA_TITLE = "title"
         const val EXTRA_BODY = "body"
         const val EXTRA_NOTIFICATION_ID = "notification_id"
