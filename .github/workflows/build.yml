@@ -119,11 +119,14 @@ jobs:
             "${{ secrets.ANDROID_KEY_ALIAS }}" \
             "${{ secrets.ANDROID_KEY_PASSWORD }}" \
             > src-tauri/gen/android/app/key.properties
+      # 注意：`${{ env.ANDROID_SDK_ROOT }}` 读不到 runner 的机器环境变量，
+      # 只能在 shell 里展开后再交给 tauri CLI。
       - name: 构建 APK
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
-          NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.0.12077973
-        run: pnpm tauri android build --apk --target aarch64
+        run: |
+          export ANDROID_HOME="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          export NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          pnpm tauri android build --apk --target aarch64
       - name: 核对 R8 没删 JNI 入口
         run: grep -E 'installUpdateApk|networkMetered' src-tauri/gen/android/app/build/outputs/mapping/universalRelease/mapping.txt
       - uses: actions/upload-artifact@v4
