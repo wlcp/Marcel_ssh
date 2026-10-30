@@ -1,0 +1,79 @@
+# 分支级编译校验（只在本仓库跑）：push 即触发，用 cargo check 快速抓类型错误。
+name: Verify
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: '重新生成 sync 作用域快照并上传'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.95.0
+
+jobs:
+  rust:
+    name: cargo check
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 去掉国内 cargo 镜像配置
+        working-directory: .
+        run: rm -f .cargo/config.toml
+      - name: 放置占位 dist
+        working-directory: .
+        run: mkdir -p dist && printf '<!doctype html><title>ci</title>' > dist/index.html
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: cargo check（含测试目标）
+        run: cargo check --locked --all-targets
+
+  snapshot:
+    name: 生成作用域快照
+    if: ${{ inputs.snapshot }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 去掉国内 cargo 镜像配置
+        working-directory: .
+        run: rm -f .cargo/config.toml
+      - name: 放置占位 dist
+        working-directory: .
+        run: mkdir -p dist && printf '<!doctype html><title>ci</title>' > dist/index.html
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: 重新生成 scope_snapshot.txt
+        run: UPDATE_SYNC_SNAPSHOT=1 cargo test --lib sync::scope_guard
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scope-snapshot
+          path: src-tauri/src/sync/scope_snapshot.txt
+          if-no-files-found: error
