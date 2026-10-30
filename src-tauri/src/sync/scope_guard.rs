@@ -55,21 +55,45 @@ fn settings_sample() -> Value {
     obj.insert(
         "llmRegistry".into(),
         serde_json::json!({
-            "version": 1,
+            // 与真实 `ChannelConfig` / `ModelEntry` / `LlmRegistry` 形状一致。
+            // 以前这里是手写的「偶像版」（kind / 嵌套 models / version），
+            // 结果真正的渠道字段一个都没被守护 —— 新加字段时快照不会变红。
             "channels": [{
                 "id": "ch-1",
                 "name": "渠道",
-                "kind": "openai",
                 "baseUrl": "https://example.com",
-                "models": [{
-                    "id": "m-1",
-                    "name": "模型",
-                    "modelName": "gpt",
-                    "contextWindow": 128000,
-                    "maxOutputTokens": 4096,
-                }],
                 "enabled": true,
+                "preset": "opencode-go",
+                "headers": { "X-Title": "Marcel SSH" },
+                "sessionHeader": "x-opencode-session",
+                "modelsUrl": "https://example.com/models",
             }],
+            "models": [{
+                "id": "m-1",
+                "channelId": "ch-1",
+                "modelName": "gpt",
+                "displayName": "",
+                "temperature": 0.1,
+                "vision": false,
+                "contextWindow": 128000,
+                "extraBody": null,
+                "reasoningEfforts": ["low", "high"],
+                "demoteNonLeadingSystem": false,
+            }],
+            "slots": {
+                "modelApprovalModelId": "",
+                "summarizerModelId": "",
+                "memoryModelId": "",
+            },
+            "subagentModels": [{ "modelId": "m-1", "description": "小模型" }],
+            "lastUsedModelId": "m-1",
+            "netPolicy": {
+                "maxRetries": 1,
+                "retryDelaySecs": 5.0,
+                "retryHttpStatuses": "408, 429, 500-599",
+                "firstByteTimeoutSecs": 60,
+                "retryOnTimeout": true,
+            },
         }),
     );
     obj.insert(

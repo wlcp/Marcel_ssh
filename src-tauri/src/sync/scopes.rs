@@ -52,6 +52,10 @@ pub static SETTINGS_RULES: ScopeRules = ScopeRules {
         ("authorizedCapabilities", Scope::Local),
         ("disableAllInjections", Scope::Local),
         ("llmConfig", Scope::Local),
+        // 渠道的附加请求头：多数是归属标识（HTTP-Referer / X-Title），
+        // 但也能塞 `x-api-key` 这类凭据。同步是明文进加密信封，
+        // 「机密不过网」这条承诺优先，跟 MCP 的 `servers/*/headers` 同一处理。
+        ("llmRegistry/channels/*/headers", Scope::Local),
         ("mobileBackgroundSettings", Scope::Local),
         ("notificationSettings", Scope::Platform),
         ("mobileNotificationSettings", Scope::Platform),

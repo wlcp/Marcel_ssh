@@ -33,7 +33,8 @@ function ScopeList() {
     {
       key: 'config',
       title: '普通配置',
-      desc: '连接、设置、快捷命令、技能、MCP 服务、已知主机指纹',
+      desc:
+        '连接、设置、快捷命令、技能、MCP 服务、已知主机指纹；本机文件路径与可能含凭据的请求头只留在本机',
       checked: true,
       note: '始终开启',
     },
