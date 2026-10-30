@@ -209,7 +209,7 @@ pub(super) async fn resolve_summarizer_manager(
         None
     } else {
         match reg.resolve_model(&reg.slots.summarizer_model_id) {
-            Ok(r) => match LlmManager::new(r.config) {
+            Ok(r) => match LlmManager::new(r.config.with_session(conversation_id)) {
                 Ok(m) => {
                     log::info!(
                         "上下文压缩使用独立模型: {}（会话 {}）",

@@ -390,7 +390,10 @@ pub async fn build_headless_llm(config_dir: &Path) -> Result<LlmManager, AppErro
     }
 
     let resolved = settings.llm_registry.resolve_default()?;
-    LlmManager::new(resolved.config)
+    // 外部 MCP 任务没有聊天会话：每次任务一个稳定 ID，
+    // 既满足「同一任务的路由/缓存一致」，又不会串到聊天会话上。
+    let task_session = uuid::Uuid::new_v4().to_string();
+    LlmManager::new(resolved.config.with_session(&task_session))
 }
 
 /// 基础工具（9 个）转成给 LLM 的工具声明，**剔除 `agent_task`**。

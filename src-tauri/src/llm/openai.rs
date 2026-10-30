@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
@@ -26,8 +26,50 @@ pub struct TextSink<'a> {
     pub delta: &'a (dyn Fn(&str) + Send + Sync),
 }
 
+/// 渠道自定义头里不允许出现的名字：会破坏鉴权或报文语义。
+const RESERVED_HEADERS: &[&str] = &[
+    "authorization",
+    "host",
+    "content-length",
+    "content-type",
+    "connection",
+    "transfer-encoding",
+    "content-encoding",
+];
+
+/// 写一个自定义请求头，名字/值非法时结构化报错（而不是静默丢弃）。
+fn insert_header(map: &mut HeaderMap, name: &str, value: &str) -> Result<(), LlmError> {
+    let name_trimmed = name.trim();
+    let header_name = HeaderName::from_bytes(name_trimmed.as_bytes())
+        .map_err(|e| LlmError::Config(format!("请求头名非法「{}」: {}", name_trimmed, e)))?;
+    if RESERVED_HEADERS
+        .iter()
+        .any(|r| header_name.as_str().eq_ignore_ascii_case(r))
+    {
+        return Err(LlmError::Config(format!(
+            "「{}」是保留请求头，不能在渠道里自定义",
+            header_name.as_str()
+        )));
+    }
+    let header_value = HeaderValue::from_str(value)
+        .map_err(|e| LlmError::Config(format!("请求头「{}」的值非法: {}", header_name.as_str(), e)))?;
+    map.insert(header_name, header_value);
+    Ok(())
+}
+
 impl OpenAiProvider {
-    pub fn new(config: LlmConfig) -> Result<Self, LlmError> {
+    pub fn new(mut config: LlmConfig) -> Result<Self, LlmError> {
+        // 会话头是「每会话稳定 ID」：漏注入时兜底一个随机 ID，
+        // 让请求仍能通过（退化的是 prompt cache 命中率，不是整条渠道 400）。
+        if !config.session_header.trim().is_empty()
+            && config.session_id.as_deref().unwrap_or("").is_empty()
+        {
+            config.session_id = Some(uuid::Uuid::new_v4().to_string());
+            log::warn!(
+                "渠道要求会话头 {}，但未注入会话 ID，本次使用随机 ID（提示缓存会失效）",
+                config.session_header
+            );
+        }
         let client = reqwest::Client::builder()
             // 客户端与请求上都不设 reqwest 总超时——它从建连覆盖到 body 读完，
             // 会把超过时限的流式生成中途掐死（表现为「读取流式响应失败: …
@@ -51,13 +93,53 @@ impl OpenAiProvider {
             .unwrap_or("https://api.openai.com/v1")
     }
 
+    /// 模型列表端点：渠道可覆写。OpenCode 的 chat 与 models 不在同一前缀下
+    /// （`/inference/go/openai/v1` vs `/inference/go/v1`），拼死一个必然 404。
+    fn models_endpoint(&self) -> String {
+        match self
+            .config
+            .models_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(explicit) => explicit.to_string(),
+            None => format!("{}/models", self.base_url().trim_end_matches('/')),
+        }
+    }
+
     fn build_headers(&self) -> Result<HeaderMap, LlmError> {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        // 自报身份：reqwest 默认不发 User-Agent，部分渠道（OpenCode Go）
+        // 明确要求客户端标识自己，而不是匿名 HTTP 库。
+        let user_agent = format!(
+            "Marcel-SSH/{} (+https://github.com/q541810/Marcel_ssh)",
+            env!("CARGO_PKG_VERSION")
+        );
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_str(&user_agent)
+                .map_err(|e| LlmError::Config(format!("User-Agent 非法: {}", e)))?,
+        );
         let auth = format!("Bearer {}", self.config.api_key);
         let auth_header = HeaderValue::from_str(&auth)
             .map_err(|e| LlmError::Config(format!("API key 含非法字符: {}", e)))?;
         headers.insert(AUTHORIZATION, auth_header);
+
+        // 渠道静态头（归属标识等）。
+        for (name, value) in &self.config.extra_headers {
+            insert_header(&mut headers, name, value)?;
+        }
+
+        // 会话头：同一会话的所有请求共用一个 ID，上游据此做路由与提示缓存。
+        let session_header = self.config.session_header.trim();
+        if !session_header.is_empty() {
+            match self.config.session_id.as_deref().filter(|s| !s.is_empty()) {
+                Some(id) => insert_header(&mut headers, session_header, id)?,
+                None => log::warn!("渠道要求会话头 {}，但本次请求没有会话 ID", session_header),
+            }
+        }
         Ok(headers)
     }
 
@@ -279,7 +361,7 @@ impl OpenAiProvider {
 
     /// Fetch the list of available models from the provider's `/models` endpoint.
     pub async fn list_models(&self) -> Result<Vec<ModelInfo>, LlmError> {
-        let url = format!("{}/models", self.base_url().trim_end_matches('/'));
+        let url = self.models_endpoint();
         log::info!("LLM 列出模型请求: {}", url);
 
         let response = self
@@ -1098,6 +1180,10 @@ mod build_request_body_tests {
             vision: false,
             extra_body: None,
             demote_non_leading_system: false,
+            extra_headers: Vec::new(),
+            session_header: String::new(),
+            session_id: None,
+            models_url: None,
         }
     }
 
@@ -1414,6 +1500,10 @@ mod vision_request_tests {
             vision,
             extra_body: None,
             demote_non_leading_system: false,
+            extra_headers: Vec::new(),
+            session_header: String::new(),
+            session_id: None,
+            models_url: None,
         }
     }
 
@@ -1740,6 +1830,10 @@ mod wire_bytes_tests {
             vision: false,
             extra_body,
             demote_non_leading_system: false,
+            extra_headers: Vec::new(),
+            session_header: String::new(),
+            session_id: None,
+            models_url: None,
         }
     }
 
@@ -1882,6 +1976,10 @@ mod header_wait_timeout_tests {
             vision: false,
             extra_body: None,
             demote_non_leading_system: false,
+            extra_headers: Vec::new(),
+            session_header: String::new(),
+            session_id: None,
+            models_url: None,
         }
     }
 
@@ -1962,5 +2060,91 @@ mod header_wait_timeout_tests {
             }
             other => panic!("应为首字超时，实际: {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod channel_header_tests {
+    use super::*;
+    use crate::llm::provider::{LlmConfig, ProviderType};
+
+    fn base() -> LlmConfig {
+        LlmConfig {
+            provider_type: ProviderType::OpenAI,
+            api_key: "sk-test".to_string(),
+            model: "glm-5.3".to_string(),
+            base_url: Some("https://opencode.ai/inference/go/openai/v1".to_string()),
+            temperature: 0.1,
+            max_retries: 0,
+            retry_delay_secs: 0.0,
+            retry_http_statuses: String::new(),
+            first_byte_timeout_secs: 60,
+            retry_on_timeout: false,
+            vision: false,
+            extra_body: None,
+            demote_non_leading_system: false,
+            extra_headers: Vec::new(),
+            session_header: String::new(),
+            session_id: None,
+            models_url: None,
+        }
+    }
+
+    fn header(p: &OpenAiProvider, name: &str) -> String {
+        p.build_headers()
+            .expect("headers ok")
+            .get(name)
+            .unwrap_or_else(|| panic!("缺少请求头 {name}"))
+            .to_str()
+            .expect("ascii")
+            .to_string()
+    }
+
+    #[test]
+    fn sends_user_agent_static_headers_and_session() {
+        let mut cfg = base();
+        cfg.extra_headers = vec![("X-Title".into(), "Marcel SSH".into())];
+        cfg.session_header = "x-opencode-session".into();
+        cfg.session_id = Some("conv-1".into());
+        let p = OpenAiProvider::new(cfg).expect("provider");
+        assert!(header(&p, "user-agent").starts_with("Marcel-SSH/"));
+        assert_eq!(header(&p, "x-title"), "Marcel SSH");
+        assert_eq!(header(&p, "x-opencode-session"), "conv-1");
+        assert!(header(&p, "authorization").starts_with("Bearer "));
+    }
+
+    #[test]
+    fn missing_session_id_gets_generated_instead_of_dropping_header() {
+        let mut cfg = base();
+        cfg.session_header = "x-opencode-session".into();
+        let p = OpenAiProvider::new(cfg).expect("provider");
+        let value = header(&p, "x-opencode-session");
+        assert!(!value.is_empty(), "会话头不能为空，否则上游 400");
+    }
+
+    #[test]
+    fn reserved_header_names_are_rejected() {
+        let mut cfg = base();
+        cfg.extra_headers = vec![("Authorization".into(), "Bearer evil".into())];
+        let p = OpenAiProvider::new(cfg).expect("provider");
+        let err = p.build_headers().expect_err("保留头必须被拒绝");
+        assert!(format!("{err}").contains("保留请求头"));
+    }
+
+    #[test]
+    fn models_endpoint_prefers_override() {
+        let mut cfg = base();
+        cfg.models_url = Some("https://opencode.ai/inference/go/v1/models".into());
+        let p = OpenAiProvider::new(cfg).expect("provider");
+        assert_eq!(
+            p.models_endpoint(),
+            "https://opencode.ai/inference/go/v1/models"
+        );
+
+        let p2 = OpenAiProvider::new(base()).expect("provider");
+        assert_eq!(
+            p2.models_endpoint(),
+            "https://opencode.ai/inference/go/openai/v1/models"
+        );
     }
 }

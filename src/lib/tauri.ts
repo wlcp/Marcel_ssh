@@ -59,6 +59,7 @@ import type {
   RiskRuleCatalog,
   SftpFileEntry,
   ModelInfo,
+  ChannelPresetInfo,
   ChannelKeyStatus,
   PluginManifest,
   PluginHttpRequest,
@@ -1137,12 +1138,21 @@ export async function llmListModels(
   channelId?: string | null,
   baseUrl?: string | null,
   apiKey?: string | null,
+  headers?: Record<string, string> | null,
+  modelsUrl?: string | null,
 ): Promise<ModelInfo[]> {
   return invoke<ModelInfo[]>("llm_list_models", {
     channelId: channelId ?? null,
     baseUrl: baseUrl ?? null,
     apiKey: apiKey ?? null,
+    headers: headers ?? null,
+    modelsUrl: modelsUrl ?? null,
   });
+}
+
+/** 内置渠道预设（OpenCode Go / Zen 等）：端点、模型列表端点与会话头名。 */
+export async function llmChannelPresets(): Promise<ChannelPresetInfo[]> {
+  return invoke<ChannelPresetInfo[]>("llm_channel_presets");
 }
 
 // Skill commands

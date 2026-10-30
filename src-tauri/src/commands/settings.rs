@@ -6,6 +6,7 @@ use crate::config::settings::AppSettings;
 use crate::error::AppError;
 use crate::llm::manager::LlmManager;
 use crate::llm::openai::ModelInfo;
+use crate::llm::presets::{self, ChannelPresetInfo};
 use crate::llm::provider::LlmConfig;
 use crate::llm::registry::migrate_legacy_settings;
 use crate::AppState;
@@ -149,6 +150,12 @@ pub fn normalize_settings_for_save(candidate: &mut AppSettings) -> Result<(), Ap
         log::warn!("保存设置前检测到子agent 候选清单含空引用/重复条目，已自动归一化");
     }
 
+    // 自愈兜底：预设渠道（OpenCode Go / Zen）补齐派生字段。只填空字段，
+    // 用户手改过的端点与会话头不会被预设覆盖。
+    for channel in &mut candidate.llm_registry.channels {
+        presets::apply_to_channel(channel);
+    }
+
     // 校验多渠道配置（含渠道重试参数、引用完整性与模型 ID 唯一性）
     candidate.llm_registry.validate()
 }
@@ -287,6 +294,13 @@ pub async fn config_validate_custom_protected_paths(paths: Vec<String>) -> Resul
     Ok(())
 }
 
+/// 内置渠道预设清单（OpenCode Go / Zen 等）。前端「添加渠道」用它预填
+/// 端点、模型列表端点与会话头名，避免桌面/移动端各抄一份 URL。
+#[tauri::command]
+pub fn llm_channel_presets() -> Vec<ChannelPresetInfo> {
+    presets::CHANNEL_PRESETS.to_vec()
+}
+
 /// Fetch the list of available models from the configured OpenAI-compatible
 /// provider. The frontend passes the current draft `channelId` / `baseUrl` /
 /// `apiKey` so the request reflects what the user sees, not what was last
@@ -301,6 +315,8 @@ pub async fn llm_list_models(
     channel_id: Option<String>,
     base_url: Option<String>,
     api_key: Option<String>,
+    headers: Option<std::collections::BTreeMap<String, String>>,
+    models_url: Option<String>,
 ) -> Result<Vec<ModelInfo>, AppError> {
     let base_url = base_url.map(|s| s.trim().to_string()).unwrap_or_default();
     if base_url.is_empty() {
@@ -349,6 +365,15 @@ pub async fn llm_list_models(
         vision: false,
         extra_body: None,
         demote_non_leading_system: false,
+        extra_headers: headers
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<Vec<(String, String)>>(),
+        session_header: String::new(),
+        session_id: None,
+        models_url: models_url
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
     };
 
     let llm_manager = LlmManager::new(config)?;

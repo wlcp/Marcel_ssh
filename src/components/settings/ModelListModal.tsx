@@ -15,6 +15,10 @@ interface Props {
   /** Draft baseUrl/apiKey from the form — reflects what the user sees. */
   baseUrl?: string | null;
   apiKey?: string | null;
+  /** 渠道静态请求头（OpenCode 等要求自报身份时使用）。 */
+  headers?: Record<string, string> | null;
+  /** 模型列表端点覆写（chat 与 models 不同前缀的渠道）。 */
+  modelsUrl?: string | null;
   /** Called when the user picks a model. The modal closes itself after. */
   onSelect: (modelId: string) => void;
 }
@@ -26,6 +30,8 @@ export default function ModelListModal({
   currentModel,
   baseUrl,
   apiKey,
+  headers,
+  modelsUrl,
   onSelect,
 }: Props) {
   const [loading, setLoading] = useState(false);
@@ -37,7 +43,7 @@ export default function ModelListModal({
     setLoading(true);
     setError(null);
     try {
-      const list = await llmListModels(channelId ?? null, baseUrl, apiKey);
+      const list = await llmListModels(channelId ?? null, baseUrl, apiKey, headers, modelsUrl);
       list.sort((a, b) => a.id.localeCompare(b.id));
       setModels(list);
     } catch (err) {
@@ -45,7 +51,8 @@ export default function ModelListModal({
     } finally {
       setLoading(false);
     }
-  }, [channelId, baseUrl, apiKey]);
+    // headers 是对象：用序列化值做依赖，避免父组件每次渲染都触发重新拉取。
+  }, [channelId, baseUrl, apiKey, JSON.stringify(headers ?? null), modelsUrl]);
 
   useEffect(() => {
     if (open) {

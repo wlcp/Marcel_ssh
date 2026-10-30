@@ -27,6 +27,7 @@ use crate::config::keychain::{self, SecretSlot};
 use crate::config::settings::AppSettings;
 use crate::error::AppError;
 use crate::llm::error::validate_retry_conditions;
+use crate::llm::presets;
 use crate::llm::provider::{LlmConfig, ProviderType};
 
 fn default_true() -> bool {
@@ -102,6 +103,19 @@ pub struct ChannelConfig {
     /// 是否启用。禁用的渠道不可被任何槽位解析到。
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// 预设标识：空 = 自定义；`opencode-go` / `opencode-zen` 走内置预设补默认值。
+    /// 只影响「补默认值 + UI 分组」，运行期一律以下面三个字段为准。
+    #[serde(default)]
+    pub preset: String,
+    /// 静态附加请求头（如归属标识）。**会随设置同步，禁止放密钥。**
+    #[serde(default)]
+    pub headers: std::collections::BTreeMap<String, String>,
+    /// 每请求注入「本会话稳定 ID」的头名（如 `x-opencode-session`），空 = 不注入。
+    #[serde(default)]
+    pub session_header: String,
+    /// 模型列表端点覆写，空 = `{base_url}/models`。
+    #[serde(default)]
+    pub models_url: String,
 }
 
 impl Default for ChannelConfig {
@@ -112,6 +126,10 @@ impl Default for ChannelConfig {
             base_url: String::new(),
             api_key: String::new(),
             enabled: true,
+            preset: String::new(),
+            headers: std::collections::BTreeMap::new(),
+            session_header: String::new(),
+            models_url: String::new(),
         }
     }
 }
@@ -397,6 +415,14 @@ impl LlmRegistry {
             vision: model.vision,
             extra_body: model.extra_body.clone(),
             demote_non_leading_system: model.demote_non_leading_system,
+            extra_headers: channel
+                .headers
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            session_header: presets::effective_session_header(channel),
+            session_id: None,
+            models_url: presets::effective_models_url(channel),
         };
         Ok(ResolvedModel {
             config,
@@ -718,6 +744,10 @@ pub fn migrate_legacy_settings(settings: &mut AppSettings) -> bool {
                 base_url,
                 api_key: legacy.api_key.clone(),
                 enabled: true,
+                preset: String::new(),
+                headers: std::collections::BTreeMap::new(),
+                session_header: String::new(),
+                models_url: String::new(),
             };
             let model = ModelEntry {
                 id: model_id.clone(),
@@ -821,6 +851,10 @@ mod tests {
             base_url: "https://api.deepseek.com/v1".into(),
             api_key: "sk-test".into(),
             enabled: true,
+            preset: String::new(),
+            headers: std::collections::BTreeMap::new(),
+            session_header: String::new(),
+            models_url: String::new(),
         });
         r.models.push(ModelEntry {
             id: "m-1".into(),
@@ -1118,6 +1152,10 @@ mod tests {
             base_url: "https://api.deepseek.com/v1".into(),
             api_key: "sk".into(),
             enabled: true,
+            preset: String::new(),
+            headers: std::collections::BTreeMap::new(),
+            session_header: String::new(),
+            models_url: String::new(),
         });
         settings.llm_registry.models.push(ModelEntry {
             id: model_id.clone(),
@@ -1344,5 +1382,57 @@ mod tests {
         let mut r = sample_registry();
         assert!(!r.dedupe_duplicate_models());
         assert_eq!(r.models.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod channel_preset_tests {
+    use super::*;
+
+    fn go_registry() -> LlmRegistry {
+        let mut r = LlmRegistry::default();
+        r.channels.push(ChannelConfig {
+            id: "c1".into(),
+            name: "OpenCode Go".into(),
+            base_url: "https://opencode.ai/inference/go/openai/v1".into(),
+            api_key: "sk-test".into(),
+            enabled: true,
+            preset: "opencode-go".into(),
+            headers: [("X-Title".to_string(), "Marcel".to_string())]
+                .into_iter()
+                .collect(),
+            session_header: String::new(),
+            models_url: String::new(),
+        });
+        r.models.push(ModelEntry {
+            id: "m1".into(),
+            channel_id: "c1".into(),
+            model_name: "glm-5.3".into(),
+            ..Default::default()
+        });
+        r
+    }
+
+    #[test]
+    fn resolved_config_carries_session_header_and_models_endpoint() {
+        let resolved = go_registry().resolve_model("m1").expect("resolve");
+        assert_eq!(resolved.config.session_header, "x-opencode-session");
+        assert_eq!(
+            resolved.config.models_url.as_deref(),
+            Some("https://opencode.ai/inference/go/v1/models")
+        );
+        assert_eq!(
+            resolved.config.extra_headers,
+            vec![("X-Title".to_string(), "Marcel".to_string())]
+        );
+        // 会话 ID 由调用方注入，解析期必须为空。
+        assert!(resolved.config.session_id.is_none());
+    }
+
+    #[test]
+    fn with_session_is_carried_through_manager_config() {
+        let resolved = go_registry().resolve_model("m1").expect("resolve");
+        let cfg = resolved.config.with_session("conv-42");
+        assert_eq!(cfg.session_id.as_deref(), Some("conv-42"));
     }
 }

@@ -98,7 +98,8 @@ pub async fn agent_compact_conversation(
             None => llm_registry.resolve_default(),
         }
     }?;
-    let llm_manager = LlmManager::new(resolved.config)?;
+    // 压缩请求与主对话同属一个会话：带同一个会话头，上游缓存与路由都受益。
+    let llm_manager = LlmManager::new(resolved.config.with_session(&conversation_id))?;
 
     // 摘要调用的工具 schema =「该会话下一次常规请求」会下发的那一份（走 `spawn`
     // 同一个 `build_registry`，工具集将来怎么变都自动跟上）：摘要调用与常规请求的

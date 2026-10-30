@@ -304,6 +304,10 @@ fn isolated_state_with(
                 base_url: model_url.into(),
                 api_key: "scripted-test-token".into(),
                 enabled: true,
+                preset: String::new(),
+                headers: std::collections::BTreeMap::new(),
+                session_header: String::new(),
+                models_url: String::new(),
             }],
             models: vec![ModelEntry {
                 id: MODEL_ID.into(),

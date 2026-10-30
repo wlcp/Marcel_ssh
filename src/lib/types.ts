@@ -737,6 +737,26 @@ export interface ChannelConfig {
   apiKey?: string;
   /** 是否启用。禁用的渠道不可被解析使用。 */
   enabled: boolean;
+  /** 预设标识（空 = 自定义）：`opencode-go` / `opencode-zen`。
+   *  只影响「补默认值 + UI 分组」，运行期以 baseUrl/sessionHeader/modelsUrl 为准。 */
+  preset?: string;
+  /** 静态附加请求头（如归属标识）。会随设置同步，**不要放密钥**。 */
+  headers?: Record<string, string>;
+  /** 每请求注入「本会话稳定 ID」的头名（如 `x-opencode-session`），空 = 不注入。 */
+  sessionHeader?: string;
+  /** 模型列表端点覆写，空 = `{baseUrl}/models`。 */
+  modelsUrl?: string;
+}
+
+/** 内置渠道预设（由后端 `llm_channel_presets` 下发，双端共用一份）。 */
+export interface ChannelPresetInfo {
+  id: string;
+  name: string;
+  baseUrl: string;
+  modelsUrl: string;
+  sessionHeader: string;
+  /** 给用户看的一句话说明（为什么需要会话头 / 有什么限制）。 */
+  note: string;
 }
 
 /** 渠道下的一个具体模型条目。 */

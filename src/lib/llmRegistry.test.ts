@@ -267,3 +267,24 @@ describe('subagentModels cross-channel retention', () => {
     expect(next.subagentModels?.[0].modelId).toBe(mb.id);
   });
 });
+
+describe('渠道预设（OpenCode 等）', () => {
+  it('createChannel 记录 preset，端点与会话头由字段承载', () => {
+    const ch = createChannel(
+      'OpenCode Go',
+      'https://opencode.ai/inference/go/openai/v1',
+      'opencode-go',
+    );
+    expect(ch.preset).toBe('opencode-go');
+    expect(ch.baseUrl).toBe('https://opencode.ai/inference/go/openai/v1');
+    // 预设的默认值由后端补齐（apply_to_channel），前端只负责把用户看到的值写进字段
+    expect(ch.sessionHeader).toBe('');
+    expect(ch.modelsUrl).toBe('');
+  });
+
+  it('不传 preset 时是普通自定义渠道', () => {
+    const ch = createChannel('DeepSeek', 'https://api.deepseek.com/v1');
+    expect(ch.preset).toBe('');
+    expect(ch.sessionHeader).toBe('');
+  });
+});

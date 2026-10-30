@@ -179,14 +179,18 @@ export function currentVision(r: LlmRegistry, sessionModelId?: string | null): b
   return effectiveModel(r, sessionModelId)?.vision ?? false;
 }
 
-/** 新建一个渠道（生成 ID，默认启用）。网络策略走全局，渠道不再持有。 */
-export function createChannel(name: string, baseUrl: string): ChannelConfig {
+/** 新建一个渠道（生成 ID，默认启用）。网络策略走全局，渠道不再持有。
+ *  `preset` 只做标记：端点与会话头仍写进各自字段，用户可随时手改。 */
+export function createChannel(name: string, baseUrl: string, preset = ''): ChannelConfig {
   return {
     id: newId(),
     name,
     baseUrl,
     apiKey: '',
     enabled: true,
+    preset,
+    sessionHeader: '',
+    modelsUrl: '',
   };
 }
 

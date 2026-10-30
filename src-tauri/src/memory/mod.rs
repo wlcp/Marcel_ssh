@@ -34,6 +34,7 @@ use tauri::AppHandle;
 use crate::data::DataSourceId;
 use crate::error::AppError;
 use crate::llm::manager::LlmManager;
+use crate::llm::provider::LlmConfig;
 use crate::AppState;
 
 pub use model::{MemoryItem, Scope, ScopeRef, Source};
@@ -110,9 +111,16 @@ pub(crate) async fn resolve_memory_model(
     conversation_id: Option<&str>,
 ) -> Result<LlmManager, AppError> {
     let reg = state.settings.read().await.llm_registry.clone();
+    // 记忆/复盘请求可能带着会话上下文，构造 manager 时注入同一个会话头；
+    // 没有会话时交给 OpenAiProvider 兜底（随机 ID，仅影响缓存命中）。
+    let session = conversation_id.map(str::trim).filter(|s| !s.is_empty());
+    let with_session = |cfg: LlmConfig| match session {
+        Some(id) => cfg.with_session(id),
+        None => cfg,
+    };
     if !reg.slots.memory_model_id.is_empty() {
         match reg.resolve_model(&reg.slots.memory_model_id) {
-            Ok(r) => return LlmManager::new(r.config),
+            Ok(r) => return LlmManager::new(with_session(r.config)),
             Err(e) => log::warn!("记忆模型解析失败，退回主模型: {e}"),
         }
     }
@@ -128,5 +136,5 @@ pub(crate) async fn resolve_memory_model(
         Some(id) => reg.resolve_override(&id)?,
         None => reg.resolve_default()?,
     };
-    LlmManager::new(resolved.config)
+    LlmManager::new(with_session(resolved.config))
 }

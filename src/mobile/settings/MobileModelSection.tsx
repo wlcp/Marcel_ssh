@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
-import type { AgentModeSettings, ChannelConfig, LlmRegistry, ModelEntry, ModelInfo, NetPolicy, SubagentModelChoice } from '@/lib/types';
-import { llmListModels } from '@/lib/tauri';
+import type { AgentModeSettings, ChannelConfig, ChannelPresetInfo, LlmRegistry, ModelEntry, ModelInfo, NetPolicy, SubagentModelChoice } from '@/lib/types';
+import { llmChannelPresets, llmListModels } from '@/lib/tauri';
 import { getErrorMessage } from '@/lib/errors';
 import Toggle from '@/components/ui/Toggle';
 import { useSettingsActions } from '@/components/settings/SettingsActionsContext';
@@ -26,6 +26,28 @@ import { MobileSettingRow } from './MobileSettingRow';
 
 const inputClass =
   'w-full rounded-lg border border-edge bg-zinc-800 px-3 py-2.5 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-500 focus:border-indigo-500';
+
+/** 请求头对象 → 每行 `name: value` 的草稿文本。 */
+function channelHeadersToText(headers?: Record<string, string>): string {
+  return Object.entries(headers ?? {})
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n');
+}
+
+/** 逐行草稿 → 请求头对象（空行与 # 注释忽略）。 */
+function parseChannelHeaderText(text: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const idx = line.indexOf(':');
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    if (key) out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 /** 候选的选型提示是中文散文，不用渠道/模型字段那套等宽字体。 */
 const descriptionInputClass =
@@ -407,6 +429,34 @@ function MobileChannelEditorSheet({
   const [name, setName] = useState(channel?.name ?? '');
   const [baseUrl, setBaseUrl] = useState(channel?.baseUrl ?? '');
   const [enabled, setEnabled] = useState(channel?.enabled ?? true);
+  const [preset, setPreset] = useState(channel?.preset ?? '');
+  const [sessionHeader, setSessionHeader] = useState(channel?.sessionHeader ?? '');
+  const [modelsUrl, setModelsUrl] = useState(channel?.modelsUrl ?? '');
+  const [headerText, setHeaderText] = useState(channelHeadersToText(channel?.headers));
+  const [presets, setPresets] = useState<ChannelPresetInfo[]>([]);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void llmChannelPresets()
+      .then((list) => {
+        if (alive) setPresets(list);
+      })
+      .catch(() => {
+        if (alive) setPresets([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const applyPreset = (p: ChannelPresetInfo) => {
+    setPreset(p.id);
+    if (!name.trim()) setName(p.name);
+    setBaseUrl(p.baseUrl);
+    setSessionHeader(p.sessionHeader);
+    setModelsUrl(p.modelsUrl);
+    setError(null);
+  };
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -447,6 +497,10 @@ function MobileChannelEditorSheet({
       name: trimmed,
       baseUrl: trimmedUrl,
       enabled,
+      preset,
+      headers: parseChannelHeaderText(headerText),
+      sessionHeader: sessionHeader.trim(),
+      modelsUrl: modelsUrl.trim(),
     };
     if (apiKeyInput.trim()) next.apiKey = apiKeyInput.trim();
     onSaveChannel(next, localModels);
@@ -461,6 +515,8 @@ function MobileChannelEditorSheet({
         channel?.id ?? draftChannelId,
         baseUrl.trim() || null,
         apiKeyInput.trim() || null,
+        parseChannelHeaderText(headerText),
+        modelsUrl.trim() || null,
       );
       list.sort((a, b) => a.id.localeCompare(b.id));
       setFetchedModels(list);
@@ -527,6 +583,75 @@ function MobileChannelEditorSheet({
           />
           {hasKey && !apiKeyInput && (
             <p className="mt-1 text-[11px] text-zinc-500">已保存密钥（掩码显示），留空不修改</p>
+          )}
+        </div>
+
+        {isNew && presets.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs text-zinc-400">快捷预设</div>
+            {presets.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => applyPreset(p)}
+                className={`w-full rounded-lg border px-3 py-2 text-left ${
+                  preset === p.id ? 'border-indigo-500/60 bg-indigo-500/10' : 'border-edge-subtle bg-zinc-900/40'
+                }`}
+              >
+                <div className="text-sm text-zinc-100">{p.name}</div>
+                <div className="mt-0.5 text-[11px] text-zinc-500">{p.note}</div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="rounded-xl border border-edge-subtle bg-zinc-900/40 px-3 py-2">
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            className="w-full text-left text-xs text-zinc-400"
+          >
+            高级：会话头 / 模型列表端点 / 附加请求头
+          </button>
+          {advancedOpen && (
+            <div className="space-y-3 pt-3">
+              <div>
+                <label className="mb-1 block text-xs text-zinc-400">会话头名</label>
+                <input
+                  type="text"
+                  value={sessionHeader}
+                  onChange={(e) => setSessionHeader(e.target.value)}
+                  placeholder="x-opencode-session（留空 = 不注入）"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-zinc-400">模型列表端点</label>
+                <input
+                  type="text"
+                  value={modelsUrl}
+                  onChange={(e) => setModelsUrl(e.target.value)}
+                  placeholder="留空 = Base URL + /models"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-zinc-400">附加请求头（勿放密钥）</label>
+                <textarea
+                  value={headerText}
+                  onChange={(e) => setHeaderText(e.target.value)}
+                  rows={3}
+                  placeholder="name: value"
+                  className={inputClass}
+                />
+              </div>
+            </div>
           )}
         </div>
 

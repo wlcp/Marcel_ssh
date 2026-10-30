@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import Toggle from '@/components/ui/Toggle';
 import ModelListModal from './ModelListModal';
 import ModelEditModal, { type ModelDraft } from './ModelEditModal';
-import type { ChannelConfig, LlmRegistry, ModelEntry } from '@/lib/types';
+import type { ChannelConfig, ChannelPresetInfo, LlmRegistry, ModelEntry } from '@/lib/types';
+import { llmChannelPresets } from '@/lib/tauri';
 import {
   modelsOfChannel,
   modelLabel,
@@ -32,6 +33,35 @@ export interface ChannelDraft {
   name: string;
   baseUrl: string;
   enabled: boolean;
+  /** 预设标识（空 = 自定义）。 */
+  preset: string;
+  /** 附加请求头草稿：每行 `name: value`。 */
+  headers: string;
+  /** 会话头名，空 = 不注入。 */
+  sessionHeader: string;
+  /** 模型列表端点覆写，空 = `{baseUrl}/models`。 */
+  modelsUrl: string;
+}
+
+/** `name: value` 逐行草稿 → 请求头对象（空行与 # 注释忽略）。 */
+export function parseHeaderDraft(text: string): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const idx = line.indexOf(':');
+    if (idx <= 0) continue;
+    const key = line.slice(0, idx).trim();
+    const value = line.slice(idx + 1).trim();
+    if (key) out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+export function headerDraftText(headers?: Record<string, string>): string {
+  return Object.entries(headers ?? {})
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n');
 }
 
 const inputClass =
@@ -64,6 +94,40 @@ export default function ChannelEditModal({
     open: false,
   });
   const [fetchPicker, setFetchPicker] = useState(false);
+  // 内置预设（OpenCode Go / Zen 等）：由后端下发，桌面与移动端共用一份。
+  const [presets, setPresets] = useState<ChannelPresetInfo[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    void llmChannelPresets()
+      .then((list) => {
+        if (alive) setPresets(list);
+      })
+      .catch(() => {
+        // 预设只是快捷入口：拉不到不影响手动填写。
+        if (alive) setPresets([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+
+  const applyPreset = (preset: ChannelPresetInfo) => {
+    setDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            preset: preset.id,
+            name: prev.name.trim() ? prev.name : preset.name,
+            baseUrl: preset.baseUrl,
+            sessionHeader: preset.sessionHeader,
+            modelsUrl: preset.modelsUrl,
+          }
+        : prev,
+    );
+    setLocalError(null);
+  };
 
   // 打开时初始化草稿
   useEffect(() => {
@@ -74,11 +138,19 @@ export default function ChannelEditModal({
               name: channel.name,
               baseUrl: channel.baseUrl ?? '',
               enabled: channel.enabled,
+              preset: channel.preset ?? '',
+              headers: headerDraftText(channel.headers),
+              sessionHeader: channel.sessionHeader ?? '',
+              modelsUrl: channel.modelsUrl ?? '',
             }
           : {
               name: '',
               baseUrl: '',
               enabled: true,
+              preset: '',
+              headers: '',
+              sessionHeader: '',
+              modelsUrl: '',
             },
       );
       // 编辑已有渠道：载入其现有模型；新建：空列表
@@ -90,6 +162,11 @@ export default function ChannelEditModal({
       setModelEditor({ open: false });
     }
   }, [open, channel, registry]);
+
+  // 请求头对象按草稿文本记忆：否则每次渲染都是新引用，会触发模型列表重复拉取。
+  // 必须放在提前 return 之前（Hooks 不能条件调用）。
+  const headerDraft = draft?.headers ?? '';
+  const draftHeaders = useMemo(() => parseHeaderDraft(headerDraft), [headerDraft]);
 
   if (!draft) return null;
 
@@ -121,6 +198,10 @@ export default function ChannelEditModal({
       name,
       baseUrl,
       enabled: draft.enabled,
+      preset: draft.preset,
+      headers: parseHeaderDraft(draft.headers),
+      sessionHeader: draft.sessionHeader.trim(),
+      modelsUrl: draft.modelsUrl.trim(),
     };
     if (apiKeyInput.trim()) {
       next.apiKey = apiKeyInput.trim();
@@ -194,6 +275,30 @@ export default function ChannelEditModal({
       size="lg"
     >
       <div className="px-5 py-4 space-y-5 overflow-y-auto max-h-[70vh]">
+        {/* ── 快捷预设（仅新建） ── */}
+        {isNew && presets.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-xs text-zinc-400">快捷预设</div>
+            <div className="flex flex-col gap-2">
+              {presets.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => applyPreset(p)}
+                  className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                    draft.preset === p.id
+                      ? 'border-indigo-500/60 bg-indigo-500/10'
+                      : 'border-edge-subtle bg-zinc-900/40 hover:bg-state-soft'
+                  }`}
+                >
+                  <div className="text-sm text-zinc-100">{p.name}</div>
+                  <div className="text-[11px] text-zinc-500 mt-0.5">{p.note}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── 基本信息 ── */}
         <div className="space-y-3">
           <div>
@@ -216,6 +321,48 @@ export default function ChannelEditModal({
               className={inputClass}
             />
           </div>
+          <details className="rounded-lg border border-edge-subtle bg-zinc-900/30 px-3 py-2">
+            <summary className="text-xs text-zinc-400 cursor-pointer select-none">
+              高级：会话头 / 模型列表端点 / 附加请求头
+            </summary>
+            <div className="space-y-3 pt-3">
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">
+                  会话头名（每个会话自动注入稳定 ID）
+                </label>
+                <input
+                  type="text"
+                  value={draft.sessionHeader}
+                  onChange={(e) => setDraft({ ...draft, sessionHeader: e.target.value })}
+                  placeholder="x-opencode-session（留空 = 不注入）"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">模型列表端点</label>
+                <input
+                  type="text"
+                  value={draft.modelsUrl}
+                  onChange={(e) => setDraft({ ...draft, modelsUrl: e.target.value })}
+                  placeholder="留空 = Base URL + /models"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">
+                  附加请求头（每行一条 name: value；会随设置同步，不要放密钥）
+                </label>
+                <textarea
+                  value={draft.headers}
+                  onChange={(e) => setDraft({ ...draft, headers: e.target.value })}
+                  rows={3}
+                  placeholder={'HTTP-Referer: https://github.com/q541810/Marcel_ssh\nX-Title: Marcel SSH'}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+          </details>
+
           <div>
             <label className="block text-xs text-zinc-400 mb-1">API Key</label>
             <div className="flex gap-2">
@@ -353,6 +500,8 @@ export default function ChannelEditModal({
         currentModel=""
         baseUrl={draft.baseUrl}
         apiKey={apiKeyInput || undefined}
+        headers={draftHeaders}
+        modelsUrl={draft.modelsUrl.trim() || null}
         onSelect={(modelId) => {
           setFetchPicker(false);
           setModelEditor({ open: true, preset: modelId });

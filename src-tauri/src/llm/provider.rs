@@ -264,6 +264,33 @@ pub struct LlmConfig {
     /// 只改发出去的形状；内存消息、落库、前端展示均不受影响。默认关。
     #[serde(default)]
     pub demote_non_leading_system: bool,
+
+    // ── 以下为运行期字段：由渠道配置派生、按会话注入，**不落盘、不同步** ──
+    /// 附加请求头（渠道静态头 + 运行时注入的会话头）。值里不放密钥。
+    #[serde(skip)]
+    pub extra_headers: Vec<(String, String)>,
+    /// 会话头名（如 `x-opencode-session`），空 = 不注入。
+    #[serde(skip)]
+    pub session_header: String,
+    /// 本会话稳定 ID，由调用方构造 manager 时用 [`LlmConfig::with_session`] 注入。
+    #[serde(skip)]
+    pub session_id: Option<String>,
+    /// 模型列表端点覆写，空 = `{base_url}/models`。
+    #[serde(skip)]
+    pub models_url: Option<String>,
+}
+
+impl LlmConfig {
+    /// 注入「本会话稳定 ID」——OpenCode 的 `x-opencode-session` 语义：
+    /// 同一会话的所有请求（含重试、压缩、子 agent）携带同一个值，
+    /// 上游据此把请求路由到同一 provider 并命中 prompt cache。
+    pub fn with_session(mut self, conversation_id: &str) -> Self {
+        let id = conversation_id.trim();
+        if !id.is_empty() {
+            self.session_id = Some(id.to_string());
+        }
+        self
+    }
 }
 
 fn default_provider() -> ProviderType {
@@ -314,6 +341,10 @@ impl Default for LlmConfig {
             vision: false,
             extra_body: None,
             demote_non_leading_system: false,
+            extra_headers: Vec::new(),
+            session_header: String::new(),
+            session_id: None,
+            models_url: None,
         }
     }
 }
@@ -393,6 +424,10 @@ mod tests {
             vision: false,
             extra_body: None,
             demote_non_leading_system: false,
+            extra_headers: Vec::new(),
+            session_header: String::new(),
+            session_id: None,
+            models_url: None,
         };
 
         // Serialize to JSON
@@ -531,6 +566,10 @@ mod tests {
             vision: false,
             extra_body: Some(serde_json::json!({ "thinking": { "type": "enabled" } })),
             demote_non_leading_system: false,
+            extra_headers: Vec::new(),
+            session_header: String::new(),
+            session_id: None,
+            models_url: None,
         };
         let json = serde_json::to_value(&config).expect("serialize");
         let extra = json
@@ -563,6 +602,10 @@ mod tests {
             vision: false,
             extra_body: None,
             demote_non_leading_system: false,
+            extra_headers: Vec::new(),
+            session_header: String::new(),
+            session_id: None,
+            models_url: None,
         };
         let json = serde_json::to_value(&config).expect("serialize");
         assert_eq!(

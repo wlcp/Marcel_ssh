@@ -1,0 +1,122 @@
+# 手动触发的双端产物构建（不影响 ci.yml 的测试流水线）。
+#
+# - Windows：NSIS 安装包（可选 minisign 签名，供无感更新使用）
+# - Android：arm64 release APK（可选正式 keystore 签名；缺 secret 时产出未签名包）
+#
+# 与 ci.yml 相同的两个环境坑：
+#   1. 仓库里入库的 .cargo/config.toml 指向国内 USTC 镜像，GitHub runner 上要去掉；
+#   2. tauri 的 generate_context! 编译期要求 frontendDist 存在，
+#      但 `pnpm tauri build` 会先跑 beforeBuildCommand（vite build）自己产出 dist。
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows:
+        description: '构建 Windows 安装包'
+        type: boolean
+        default: true
+      android:
+        description: '构建 Android APK'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.95.0
+
+jobs:
+  windows:
+    name: Windows NSIS
+    if: ${{ inputs.windows }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 去掉国内 cargo 镜像配置
+        run: rm -f .cargo/config.toml
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 构建安装包
+        run: pnpm tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  android:
+    name: Android APK
+    if: ${{ inputs.android }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 去掉国内 cargo 镜像配置
+        run: rm -f .cargo/config.toml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: 安装 SDK 组件
+        run: sdkmanager 'platforms;android-36' 'ndk;27.0.12077973'
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 还原签名 keystore（有 secret 才做）
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$RUNNER_TEMP/release.keystore" \
+            "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            "${{ secrets.ANDROID_KEY_ALIAS }}" \
+            "${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            > src-tauri/gen/android/app/key.properties
+      - name: 构建 APK
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+          NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.0.12077973
+        run: pnpm tauri android build --apk --target aarch64
+      - name: 核对 R8 没删 JNI 入口
+        run: grep -E 'installUpdateApk|networkMetered' src-tauri/gen/android/app/build/outputs/mapping/universalRelease/mapping.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error

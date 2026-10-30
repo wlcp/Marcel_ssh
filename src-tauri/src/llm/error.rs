@@ -73,6 +73,16 @@ impl From<LlmError> for AppError {
         match err {
             LlmError::Cancelled => AppError::Cancelled("LLM 请求已取消".into()),
             LlmError::Config(msg) => AppError::Config(msg),
+            // 渠道要求会话头但没发：给一句能直接照做的提示，
+            // 而不是把上游的英文原文丢给用户猜。
+            LlmError::HttpStatus { status: 400, ref body }
+                if body.contains("MissingSessionID") =>
+            {
+                AppError::Llm(format!(
+                    "LLM 返回错误 400: {}；该端点要求会话头（{}），请在渠道里选择 OpenCode 预设，或填写「会话头名」",
+                    body, "x-opencode-session"
+                ))
+            }
             other => AppError::Llm(other.to_string()),
         }
     }

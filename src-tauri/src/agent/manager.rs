@@ -589,6 +589,10 @@ impl AgentManager {
                 }
             }
         }
+        // 会话头（opencode 的 `x-opencode-session`）：同一会话的所有请求
+        // （含重试/压缩/审批）共用一个稳定 ID，上游据此路由并命中提示缓存。
+        // `spec.session_id` 是 SSH 连接 id，不能拿来当会话标识。
+        let llm_config = llm_config.with_session(&spec.conversation_id);
         let llm_manager = LlmManager::new(llm_config)?;
         log::info!(
             "Agent task {} 使用模型: {} ({:?})",
@@ -610,6 +614,8 @@ impl AgentManager {
                 Ok(mut r) => {
                     // 审批调用不带自由参数（extra_body 针对主对话模型调参）。
                     r.config.extra_body = None;
+                    // 审批同样属于本会话的请求，带上同一个会话头。
+                    r.config = r.config.with_session(&spec.conversation_id);
                     Some(r.config)
                 }
                 Err(e) => {
