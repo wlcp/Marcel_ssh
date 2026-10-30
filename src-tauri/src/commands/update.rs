@@ -5,7 +5,7 @@ use tauri_plugin_shell::ShellExt;
 
 use crate::error::AppError;
 
-const DEFAULT_RELEASE_URL: &str = "https://github.com/q541810/Marcel_ssh/releases";
+const DEFAULT_RELEASE_URL: &str = "https://github.com/wlcp/Marcel_ssh/releases";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -239,11 +239,11 @@ pub async fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(),
 /// `cdn`/`testingcf` 仍是 v1.7.2）——所以必须并发取最高版本，不能「第一个成功
 /// 者生效」，否则只要第一个入口是旧缓存，后面的新内容就永远轮不到。
 pub const CHECK_URLS: &[&str] = &[
-    "https://raw.githubusercontent.com/q541810/Marcel_ssh/main/latest.json",
-    "https://cdn.jsdelivr.net/gh/q541810/Marcel_ssh@main/latest.json",
-    "https://fastly.jsdelivr.net/gh/q541810/Marcel_ssh@main/latest.json",
-    "https://gcore.jsdelivr.net/gh/q541810/Marcel_ssh@main/latest.json",
-    "https://testingcf.jsdelivr.net/gh/q541810/Marcel_ssh@main/latest.json",
+    "https://raw.githubusercontent.com/wlcp/Marcel_ssh/main/latest.json",
+    "https://cdn.jsdelivr.net/gh/wlcp/Marcel_ssh@main/latest.json",
+    "https://fastly.jsdelivr.net/gh/wlcp/Marcel_ssh@main/latest.json",
+    "https://gcore.jsdelivr.net/gh/wlcp/Marcel_ssh@main/latest.json",
+    "https://testingcf.jsdelivr.net/gh/wlcp/Marcel_ssh@main/latest.json",
 ];
 
 /// 拉取并解析 latest.json（command 与后台调度器共用入口）。
@@ -423,17 +423,17 @@ mod tests {
     fn desktop_reads_top_level() {
         let latest = json!({
             "version": "0.8.1",
-            "release_url": "https://github.com/q541810/Marcel_ssh/releases/tag/v0.8.1",
+            "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v0.8.1",
             "android": {
                 "version": "0.8.0",
-                "release_url": "https://github.com/q541810/Marcel_ssh/releases/tag/v0.8.0"
+                "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v0.8.0"
             }
         });
         let (v, url) = pick_latest(&latest, false);
         assert_eq!(v, "0.8.1");
         assert_eq!(
             url,
-            "https://github.com/q541810/Marcel_ssh/releases/tag/v0.8.1"
+            "https://github.com/wlcp/Marcel_ssh/releases/tag/v0.8.1"
         );
     }
 
@@ -441,17 +441,17 @@ mod tests {
     fn android_reads_android_field() {
         let latest = json!({
             "version": "0.8.1",
-            "release_url": "https://github.com/q541810/Marcel_ssh/releases/tag/v0.8.1",
+            "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v0.8.1",
             "android": {
                 "version": "0.8.0",
-                "release_url": "https://github.com/q541810/Marcel_ssh/releases/tag/v0.8.0"
+                "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v0.8.0"
             }
         });
         let (v, url) = pick_latest(&latest, true);
         assert_eq!(v, "0.8.0");
         assert_eq!(
             url,
-            "https://github.com/q541810/Marcel_ssh/releases/tag/v0.8.0"
+            "https://github.com/wlcp/Marcel_ssh/releases/tag/v0.8.0"
         );
     }
 
@@ -459,13 +459,13 @@ mod tests {
     fn android_falls_back_to_top_level_when_android_field_missing() {
         let latest = json!({
             "version": "0.8.0",
-            "release_url": "https://github.com/q541810/Marcel_ssh/releases/tag/v0.8.0"
+            "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v0.8.0"
         });
         let (v, url) = pick_latest(&latest, true);
         assert_eq!(v, "0.8.0");
         assert_eq!(
             url,
-            "https://github.com/q541810/Marcel_ssh/releases/tag/v0.8.0"
+            "https://github.com/wlcp/Marcel_ssh/releases/tag/v0.8.0"
         );
     }
 
@@ -473,7 +473,7 @@ mod tests {
     fn android_falls_back_to_top_level_when_android_field_not_object() {
         let latest = json!({
             "version": "0.8.0",
-            "release_url": "https://github.com/q541810/Marcel_ssh/releases/tag/v0.8.0",
+            "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v0.8.0",
             "android": "0.8.0"
         });
         let (v, _url) = pick_latest(&latest, true);
@@ -749,7 +749,7 @@ mod tests {
             assert!(url.starts_with("https://"), "检查源必须 https: {}", url);
             assert!(url.ends_with("/latest.json"), "检查源指向了别的文件: {}", url);
             assert!(
-                url.contains("q541810/Marcel_ssh"),
+                url.contains("wlcp/Marcel_ssh"),
                 "检查源指向了别的仓库: {}",
                 url
             );
@@ -771,7 +771,7 @@ mod tests {
                 continue;
             }
             assert!(
-                url.contains("/gh/q541810/Marcel_ssh@main/"),
+                url.contains("/gh/wlcp/Marcel_ssh@main/"),
                 "jsDelivr 源必须引用 main 分支而不是 tag（tag 需人工维护且有发布顺序陷阱）: {}",
                 url
             );

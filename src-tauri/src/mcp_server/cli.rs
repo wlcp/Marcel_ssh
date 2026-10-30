@@ -223,7 +223,7 @@ async fn run_http(server: &McpServer) -> Result<(), Box<dyn std::error::Error>> 
 /// `app_config_dir()`（= `{系统配置目录}/{identifier}`）定位配置目录，无头模式
 /// 没有 Tauri 可问，只能自己拼同一条路径。拼错不会报错——只会读到空的目录、
 /// 一条连接都看不见，然后让人以为是「连接没保存上」。
-const APP_IDENTIFIER: &str = "com.marcel.ssh";
+const APP_IDENTIFIER: &str = "com.wlcp.marcel";
 
 /// 解析配置目录。
 ///

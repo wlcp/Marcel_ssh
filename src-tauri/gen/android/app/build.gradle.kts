@@ -24,10 +24,12 @@ val keyProperties = Properties().apply {
 
 android {
     compileSdk = 36
+    // namespace（Kotlin 包 / R 类 / manifest 相对类名解析）保持不变，
+    // 只换 applicationId：同一台机器上可与官方版共存，互不覆盖。
     namespace = "com.marcel.ssh"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "com.marcel.ssh"
+        applicationId = "com.wlcp.marcel"
         minSdk = 24
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()

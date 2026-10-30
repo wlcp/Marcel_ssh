@@ -5,7 +5,7 @@ use crate::error::AppError;
 
 /// Service name used in the system keychain. All entries for this app are scoped
 /// under this service to avoid colliding with other apps.
-const SERVICE: &str = "com.marcel.ssh";
+const SERVICE: &str = "com.wlcp.marcel";
 
 // ── Android ──────────────────────────────────────────────────────────────────
 // keyring v4 的 `v1` 便利模块只覆盖 macOS/Windows/Linux，Android 不在其中
