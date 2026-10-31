@@ -135,6 +135,7 @@ settings	notificationSettings / sound	platform
 settings	panelHeight	local
 settings	privacyMode	shared
 settings	riskRuleOverrides / shell.rm	shared
+settings	syncSecrets	shared
 settings	terminalColors / background	shared
 settings	terminalColors / black	shared
 settings	terminalColors / blue	shared
