@@ -1,7 +1,8 @@
-# 手动触发的双端产物构建（不影响 ci.yml 的测试流水线）。
+# 手动触发的双端产物构建 + 发布（不影响 ci.yml 的测试流水线）。
 #
-# - Windows：NSIS 安装包（可选 minisign 签名，供无感更新使用）
-# - Android：arm64 release APK（可选正式 keystore 签名；缺 secret 时产出未签名包）
+# - Windows：NSIS 安装包；有 `TAURI_SIGNING_PRIVATE_KEY` 时自动用 minisign 签名（桌面端一键更新必需）
+# - Android：arm64 release APK（有 keystore secrets 时用正式签名）
+# - release=true：建/更新 GitHub Release、上传资产、按产物重算 latest.json（sha256/size/signature）
 #
 # 与 ci.yml 相同的两个环境坑：
 #   1. 仓库里入库的 .cargo/config.toml 指向国内 USTC 镜像，GitHub runner 上要去掉；
@@ -20,9 +21,13 @@ on:
         description: '构建 Android APK'
         type: boolean
         default: true
+      release:
+        description: '发布到 GitHub Release 并更新 latest.json'
+        type: boolean
+        default: false
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,6 +42,9 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # 私钥只在 runner 内存里落地成临时文件，构建完即随 runner 销毁。
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,13 +66,22 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: 构建安装包
         run: pnpm tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: 签名安装包（有私钥才做）
+        if: ${{ env.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          KEY="$RUNNER_TEMP/marcel-update.key"
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$KEY"
+          EXE=$(ls src-tauri/target/release/bundle/nsis/*.exe | head -1)
+          pnpm tauri signer sign -f "$KEY" -p "" "$EXE"
+          rm -f "$KEY"
+          ls -l src-tauri/target/release/bundle/nsis/
       - uses: actions/upload-artifact@v4
         with:
           name: windows-nsis
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
           if-no-files-found: error
 
   android:
@@ -72,7 +89,6 @@ jobs:
     if: ${{ inputs.android }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # 放到 job 级 env：step 的 if 读不到 step 级 env，也读不到 secrets 上下文。
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
     steps:
@@ -85,8 +101,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      # runner 镜像自带 Android SDK；setup-android@v3 在当前镜像上会因缺 'tools' 包失败，
-      # 这里直接调用镜像里的 sdkmanager。
       - name: 安装 SDK 组件
         run: |
           SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
@@ -119,8 +133,6 @@ jobs:
             "${{ secrets.ANDROID_KEY_ALIAS }}" \
             "${{ secrets.ANDROID_KEY_PASSWORD }}" \
             > src-tauri/gen/android/app/key.properties
-      # 注意：`${{ env.ANDROID_SDK_ROOT }}` 读不到 runner 的机器环境变量，
-      # 只能在 shell 里展开后再交给 tauri CLI。
       - name: 构建 APK
         run: |
           export ANDROID_HOME="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
@@ -134,3 +146,37 @@ jobs:
           name: android-apk
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
+
+  release:
+    name: 发布
+    needs: [windows, android]
+    if: ${{ inputs.release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: 建 / 更新 Release，上传资产并写 latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c "import json;print(json.load(open('package.json'))['version'])")
+          TAG="v$VERSION"
+          EXE=$(find dist -name '*.exe' -print -quit)
+          SIG=$(find dist -name '*.exe.sig' -print -quit)
+          APK=$(find dist -name '*.apk' -print -quit)
+          for f in "$EXE" "$SIG" "$APK"; do [ -n "$f" ] || { echo "缺少产物"; exit 1; }; done
+          cp "$EXE" "Marcel-SSH-Self_${VERSION}_x64-setup.exe"
+          cp "$SIG" "Marcel-SSH-Self_${VERSION}_x64-setup.exe.sig"
+          cp "$APK" "Marcel-SSH-Self_${VERSION}_arm64.apk"
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "自建版本线 $TAG"
+          gh release upload "$TAG" \
+            "Marcel-SSH-Self_${VERSION}_x64-setup.exe" \
+            "Marcel-SSH-Self_${VERSION}_arm64.apk" --clobber
+          python3 scripts/publish_latest.py "$VERSION" \
+            "Marcel-SSH-Self_${VERSION}_x64-setup.exe" \
+            "Marcel-SSH-Self_${VERSION}_x64-setup.exe.sig" \
+            "Marcel-SSH-Self_${VERSION}_arm64.apk"
