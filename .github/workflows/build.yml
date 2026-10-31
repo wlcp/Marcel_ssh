@@ -66,15 +66,15 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: 构建安装包
         run: pnpm tauri build
+      # 注意：job 级 env 已经把私钥喂给 CLI（`--private-key` 的 env 变量），
+      # 此时再传 `-f/--private-key-path` 会被 clap 判为参数冲突（实测报
+      # "cannot be used with --private-key"），所以这里只用 env、不传 -f。
       - name: 签名安装包（有私钥才做）
         if: ${{ env.TAURI_SIGNING_PRIVATE_KEY != '' }}
         run: |
           set -euo pipefail
-          KEY="$RUNNER_TEMP/marcel-update.key"
-          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$KEY"
           EXE=$(ls src-tauri/target/release/bundle/nsis/*.exe | head -1)
-          pnpm tauri signer sign -f "$KEY" -p "" "$EXE"
-          rm -f "$KEY"
+          pnpm tauri signer sign -p "" "$EXE"
           ls -l src-tauri/target/release/bundle/nsis/
       - uses: actions/upload-artifact@v4
         with:
