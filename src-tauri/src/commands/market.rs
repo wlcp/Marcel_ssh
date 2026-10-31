@@ -78,12 +78,21 @@ const DEFAULT_MIRRORS: &[&str] = &[
     "https://ghproxy.net",
 ];
 
-/// 内置默认市场索引源：jsDelivr CDN 优先（国内可达、上架 Action purge 保实时）。
-const DEFAULT_INDEX_SOURCE: &str =
-    "https://cdn.jsdelivr.net/gh/q541810/marcel-ssh-plugins@main/index.json";
-/// GitHub raw 兜底源（镜像偶发故障时使用；国内网络通常不可达）。
-const DEFAULT_INDEX_FALLBACK: &str =
-    "https://raw.githubusercontent.com/q541810/marcel-ssh-plugins/HEAD/index.json";
+/// 内置市场索引源：按「国内可达性」排序，全部并发拉取（取 generatedAt 最新的一份）。
+///
+/// 为什么这么长：jsDelivr 主域与 raw.githubusercontent 在国内经常被 RST/超时，
+/// 只留两个源时用户看到的就是「所有源都不可用」。这里补上 jsDelivr 的其它边缘节点
+/// 与三个 GitHub 加速前缀（与 latest.json 用的是同一批镜像），任一条通就能打开市场。
+const DEFAULT_INDEX_SOURCES: &[&str] = &[
+    "https://cdn.jsdelivr.net/gh/q541810/marcel-ssh-plugins@main/index.json",
+    "https://fastly.jsdelivr.net/gh/q541810/marcel-ssh-plugins@main/index.json",
+    "https://gcore.jsdelivr.net/gh/q541810/marcel-ssh-plugins@main/index.json",
+    "https://testingcf.jsdelivr.net/gh/q541810/marcel-ssh-plugins@main/index.json",
+    "https://raw.githubusercontent.com/q541810/marcel-ssh-plugins/HEAD/index.json",
+    "https://ghfast.top/https://raw.githubusercontent.com/q541810/marcel-ssh-plugins/HEAD/index.json",
+    "https://gh-proxy.com/https://raw.githubusercontent.com/q541810/marcel-ssh-plugins/HEAD/index.json",
+    "https://ghproxy.net/https://raw.githubusercontent.com/q541810/marcel-ssh-plugins/HEAD/index.json",
+];
 
 /// 单次下载大小上限（zip 归档）。
 const MAX_DOWNLOAD_BYTES: u64 = 100 * 1024 * 1024;
@@ -242,8 +251,11 @@ pub fn index_urls(mirror: Option<&str>) -> Vec<String> {
         )),
         MirrorKind::None => {}
     }
-    urls.push(DEFAULT_INDEX_SOURCE.to_string());
-    urls.push(DEFAULT_INDEX_FALLBACK.to_string());
+    for default in DEFAULT_INDEX_SOURCES {
+        if !urls.iter().any(|u| u == default) {
+            urls.push((*default).to_string());
+        }
+    }
     urls
 }
 
@@ -274,6 +286,13 @@ pub fn raw_file_urls(owner: &str, repo: &str, file: &str, mirror: Option<&str>) 
         "https://raw.githubusercontent.com/{}/{}/HEAD/{}",
         owner, repo, file
     ));
+    // 国内兜底：直接走 GitHub 加速前缀（与索引同一批镜像）。
+    for prefix in DEFAULT_MIRRORS {
+        urls.push(format!(
+            "{}/https://raw.githubusercontent.com/{}/{}/HEAD/{}",
+            prefix, owner, repo, file
+        ));
+    }
     urls
 }
 
@@ -478,8 +497,25 @@ fn bust_url(url: &str, ts: i64) -> String {
 /// (empty = built-in defaults). Order: custom mirror → jsDelivr → GitHub raw.
 /// 为穿透 jsDelivr 12h 边缘缓存（`?t=` 对 cdn.jsdelivr.net 无效），改为并发拉取全部候选源并取 `generatedAt` 最新的那份；
 /// 单源失败不影响其它源，全部失败才报错。每次请求仍带 `no-cache` 头与时间戳。
+/// 上次成功拉到的索引缓存：全部源都不可达时用它把市场打开（至少还能看到上次的列表）。
+const INDEX_CACHE_FILE: &str = "market_index_cache.json";
+
+fn read_index_cache(dir: &std::path::Path) -> Option<MarketIndex> {
+    let text = std::fs::read_to_string(dir.join(INDEX_CACHE_FILE)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn write_index_cache(dir: &std::path::Path, text: &str) {
+    if let Err(e) = std::fs::write(dir.join(INDEX_CACHE_FILE), text) {
+        log::warn!("缓存市场索引失败: {}", e);
+    }
+}
+
 #[tauri::command]
-pub async fn market_list(index_url: Option<String>) -> Result<MarketIndex, AppError> {
+pub async fn market_list(
+    state: tauri::State<'_, crate::AppState>,
+    index_url: Option<String>,
+) -> Result<MarketIndex, AppError> {
     let urls = index_urls(index_url.as_deref());
     let ts = chrono::Utc::now().timestamp_millis();
     let busted: Vec<String> = urls.into_iter().map(|u| bust_url(&u, ts)).collect();
@@ -501,14 +537,29 @@ pub async fn market_list(index_url: Option<String>) -> Result<MarketIndex, AppEr
             best = Some(opt);
         }
     }
-    if let Some((idx, _)) = best {
+    if let Some((idx, text)) = best {
+        write_index_cache(&state.config_dir, &text);
         return Ok(idx);
     }
     // 降级：串行 fetch_first（保留原错误聚合）
-    let text = fetch_first(&busted)
-        .await
-        .map_err(|e| AppError::Network(format!("拉取市场索引失败: {}", e)))?;
-    parse_market_index(&text)
+    match fetch_first(&busted).await {
+        Ok(text) => {
+            let idx = parse_market_index(&text)?;
+            write_index_cache(&state.config_dir, &text);
+            Ok(idx)
+        }
+        Err(e) => {
+            // 全都不可达：用上次成功拉到的索引，市场至少能打开（详情/安装仍需网络）。
+            if let Some(idx) = read_index_cache(&state.config_dir) {
+                log::warn!("市场索引全部源不可达，改用本机缓存: {}", e);
+                return Ok(idx);
+            }
+            Err(AppError::Network(format!(
+                "拉取市场索引失败: {}（可检查系统代理，或到「插件市场」右上角设置一个可用的 GitHub 加速镜像）",
+                e
+            )))
+        }
+    }
 }
 
 /// Fetch plugin.json + README.md from the plugin's GitHub repo, routed through
@@ -642,16 +693,19 @@ mod tests {
 
     #[test]
     fn index_urls_order_matches_mirror_kind() {
-        // 无配置：内置默认 + raw 兜底
+        // 无配置：全部内置源（jsDelivr 多边缘 + raw + 三个加速前缀）
         let urls = index_urls(None);
-        assert_eq!(urls.len(), 2);
+        assert_eq!(urls.len(), DEFAULT_INDEX_SOURCES.len());
         assert!(urls[0].contains("cdn.jsdelivr.net"));
-        assert!(urls[1].contains("raw.githubusercontent.com"));
+        assert!(urls
+            .iter()
+            .any(|u| u.contains("raw.githubusercontent.com")));
+        assert!(urls.iter().any(|u| u.starts_with("https://ghfast.top/")));
 
         // 旧版 index.json URL：直接用 + 内置兜底
         let urls = index_urls(Some("https://my.mirror/x/index.json"));
         assert_eq!(urls[0], "https://my.mirror/x/index.json");
-        assert_eq!(urls.len(), 3);
+        assert_eq!(urls.len(), DEFAULT_INDEX_SOURCES.len() + 1);
 
         // 前缀镜像：构造 raw 索引 + 内置兜底
         let urls = index_urls(Some("https://ghfast.top"));
@@ -659,7 +713,8 @@ mod tests {
             urls[0],
             "https://ghfast.top/https://raw.githubusercontent.com/q541810/marcel-ssh-plugins/HEAD/index.json"
         );
-        assert_eq!(urls.len(), 3);
+        // 用户配置的与内置去重（同一个前缀不重复请求）
+        assert_eq!(urls.len(), DEFAULT_INDEX_SOURCES.len());
 
         // jsDelivr：构造 jsDelivr 索引 + 内置兜底
         let urls = index_urls(Some("https://cdn.jsdelivr.net"));
@@ -669,30 +724,31 @@ mod tests {
 
     #[test]
     fn raw_file_urls_cover_all_mirror_kinds() {
-        // 无配置：jsDelivr main/master + raw 兜底
+        // 无配置：jsDelivr main/master + raw + 三个加速前缀
         let urls = raw_file_urls("o", "r", "plugin.json", None);
-        assert_eq!(urls.len(), 3);
+        assert_eq!(urls.len(), 3 + DEFAULT_MIRRORS.len());
         assert!(urls[0].contains("@main"));
         assert!(urls[1].contains("@master"));
         assert!(urls[2].contains("raw.githubusercontent.com"));
+        assert!(urls[3].starts_with("https://ghfast.top/"));
 
-        // 前缀镜像：1 个前缀 URL + raw 兜底
+        // 前缀镜像：1 个前缀 URL + raw + 其它内置前缀
         let urls = raw_file_urls("o", "r", "plugin.json", Some("https://ghfast.top"));
-        assert_eq!(urls.len(), 2);
+        assert_eq!(urls.len(), 1 + DEFAULT_MIRRORS.len());
         assert!(urls[0].starts_with(
             "https://ghfast.top/https://raw.githubusercontent.com/o/r/HEAD/plugin.json"
         ));
         assert!(urls[1].contains("raw.githubusercontent.com"));
 
-        // jsDelivr：2 个 jsDelivr + raw 兜底
+        // jsDelivr：2 个 jsDelivr + raw + 其它内置前缀
         let urls = raw_file_urls("o", "r", "plugin.json", Some("https://cdn.jsdelivr.net"));
-        assert_eq!(urls.len(), 3);
+        assert_eq!(urls.len(), 2 + DEFAULT_MIRRORS.len());
         assert!(urls[0].contains("@main"));
         assert!(urls[1].contains("@master"));
 
-        // 旧版 index.json：仅 raw 兜底
+        // 旧版 index.json：raw + 其它内置前缀
         let urls = raw_file_urls("o", "r", "plugin.json", Some("https://x/index.json"));
-        assert_eq!(urls.len(), 1);
+        assert_eq!(urls.len(), 1 + DEFAULT_MIRRORS.len());
         assert!(urls[0].contains("raw.githubusercontent.com"));
     }
 
