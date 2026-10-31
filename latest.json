@@ -2,14 +2,14 @@
     "version": "1.11.3",
     "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.3",
     "installer_url": "https://github.com/wlcp/Marcel_ssh/releases/download/v1.11.3/Marcel-SSH-Self_1.11.3_x64-setup.exe",
-    "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUTW1EMkZVaUpSQUZSa29DOWZlNUFsbDhwS21ML2tZcWt1QjBvYW9UTXFrWGFoZCtFcHhhZ282c2hEZk1VSmxqdE00N0ZiSmtpNkNyYm55T1RRUWFxVkJidHFSMGtTK1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNDM2MjYwCWZpbGU6TWFyY2VsLVNTSC1TZWxmXzEuMTEuM194NjQtc2V0dXAuZXhlCjlIM2w1am8wZlFzSTFROVY4VVJKWFFqWVM4QTFvVDZLejVVYVhKWDhZTXZnK3BzR1JOZ1BQb0syTjVGYmlYTVB0WGRBc09xK21hekR1N0Q5MG00RkJBPT0K",
-    "sha256": "b98762b59171c66f97d2fddd85becd007701e3450a2dce78e3e9baac0683260b",
-    "size": 13854319,
+    "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUTW1EMkZVaUpSQURZNEtFR2JzU0xsQjJIeFc4UUVaVXR3Y2VDOFVGNmtWNENDK2tkSGNQeTNrY2t2cUV0LzhIblRFbUs4L0JQamdRN2ExV3BCZWRXQ3NCZ3BmV1Blc2dnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzNDM5MDQ5CWZpbGU6TWFyY2VsIFNTSCBTZWxmXzEuMTEuM194NjQtc2V0dXAuZXhlCm1HbWtzaEpsQlIvNUxhQWRDTkYwVktTaE1XRk9nZVh1alMrUFF1Z1dSSHNycTQxemwybkMrZThqV1pzR1NRTEl5R2NLaE1sVU44VUx1cHVCblpmQ0FBPT0K",
+    "sha256": "6eed251430b406d728d03b51a7a26ac3a9b4878edba7ed713db7de894781534a",
+    "size": 13846650,
     "android": {
         "version": "1.11.3",
         "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.3",
         "installer_url": "https://github.com/wlcp/Marcel_ssh/releases/download/v1.11.3/Marcel-SSH-Self_1.11.3_arm64.apk",
-        "sha256": "b4bf220424c33d7f5361470edb466f1f749bc74551fc62e86e2120c8ddf126c2",
+        "sha256": "dfb04a5406617e236179ea0a0f6f95d943168cb20c17396b987368e0ed4bf6b5",
         "size": 32536183
     }
 }
