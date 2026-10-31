@@ -677,7 +677,11 @@ async fn actor_loop(
             change = changes.recv(), if changes_open => {
                 match change {
                     Ok(c) => {
-                        if c.source.sync_key().is_some() && engine.enabled() {
+                        // 配置档走 JSON store 自动广播；机密（密钥链 / 私钥库）
+                        // 由底层模块手动 `publish_global`，两者都要能唤醒防抖。
+                        let synced = c.source.sync_key().is_some()
+                            || c.source.tier() == crate::data::SyncTier::Secret;
+                        if synced && engine.enabled() {
                             sched.on_local_change(Instant::now());
                         }
                     }

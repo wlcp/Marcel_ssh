@@ -321,12 +321,21 @@ impl SecretSlot {
 // 错误信息只带槽位的中文名与底层错误，**绝不带机密本身**。
 
 /// 把机密写进槽位（已有则覆盖）。
+/// 写一个槽位。值没变就不写、也不通报变更（同步落地会重复写同样的值，
+/// 不比较的话每一轮落地都会被当成「本机改了机密」，白跑一轮同步）。
 pub fn set(slot: &SecretSlot, secret: &str) -> Result<(), AppError> {
     let entry = store_impl::entry(SERVICE, &slot.account())
         .map_err(|e| AppError::Config(format!("密钥链初始化失败：{}", e)))?;
+    // 值没变：不写、也不通报（同步落地会重复写同样的值，不比较的话每轮落地
+    // 都会被当成「本机改了机密」，白跑一轮同步）。
+    if store_impl::get_optional_password(&entry).ok().flatten().as_deref() == Some(secret) {
+        return Ok(());
+    }
     entry
         .set_password(secret)
         .map_err(|e| AppError::Config(format!("保存{}到密钥链失败：{}", slot.describe(), e)))?;
+    // 让同步引擎在 2 秒防抖内被唤醒，而不是等 60 秒兜底轮。
+    crate::data::bus::publish_global(crate::data::DataSourceId::Secrets);
     Ok(())
 }
 
@@ -338,12 +347,17 @@ pub fn get(slot: &SecretSlot) -> Result<Option<String>, AppError> {
         .map_err(|e| AppError::Config(format!("读取{}失败：{}", slot.describe(), e)))
 }
 
-/// 删除槽位里的机密；本来就没有视为成功。
+/// 删除槽位里的机密；本来就没有视为成功。真删掉了才通报（不存在不必惊动同步）。
 pub fn delete(slot: &SecretSlot) -> Result<(), AppError> {
     let entry = store_impl::entry(SERVICE, &slot.account())
         .map_err(|e| AppError::Config(format!("密钥链初始化失败：{}", e)))?;
+    let existed = store_impl::get_optional_password(&entry).ok().flatten().is_some();
     store_impl::delete_if_exists(&entry)
-        .map_err(|e| AppError::Config(format!("删除{}失败：{}", slot.describe(), e)))
+        .map_err(|e| AppError::Config(format!("删除{}失败：{}", slot.describe(), e)))?;
+    if existed {
+        crate::data::bus::publish_global(crate::data::DataSourceId::Secrets);
+    }
+    Ok(())
 }
 
 /// 槽位里有没有机密（只回答有无，不把值交给调用方）。

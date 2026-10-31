@@ -229,6 +229,9 @@ impl AppState {
 
         // 数据变更广播：先建好，各 store 与 known_hosts 写盘后都往这里发。
         let data_changes = DataChangeBus::new();
+        // 密钥链 / 私钥库这些没有 AppState 的模块靠它通报「机密变了」，
+        // 同步引擎才能在 2 秒防抖内被唤醒，而不是等 60 秒兜底轮。
+        crate::data::bus::install_global(data_changes.clone());
 
         // Pre-compute file paths so each `spawn_blocking` closure can own its
         // own copy without borrowing `config_dir`.

@@ -422,6 +422,8 @@ impl KeyStore {
         };
         index.keys.push(meta.clone());
         self.save_index(&index)?;
+        // 私钥库不在 DataChangeBus 的 JSON store 上，手动补一条：同步引擎 2 秒内醒来。
+        crate::data::bus::publish_global(DataSourceId::Secrets);
         Ok(meta)
     }
 
@@ -468,7 +470,10 @@ impl KeyStore {
                 )));
             }
         }
-        self.save_index(&index)
+        self.save_index(&index)?;
+        // 私钥库不在 DataChangeBus 的 JSON store 上，手动补一条通报。
+        crate::data::bus::publish_global(DataSourceId::Secrets);
+        Ok(())
     }
 
     fn origin_status(&self, id: &str) -> Result<Option<OriginStatus>, AppError> {

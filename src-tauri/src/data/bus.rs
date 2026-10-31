@@ -25,6 +25,22 @@ pub struct DataChange {
 #[derive(Clone)]
 pub struct DataChangeBus(broadcast::Sender<DataChange>);
 
+/// 进程级总线句柄：让**没有 `AppState` 的底层模块**（密钥链、私钥库）也能通报
+/// 「机密变了」。`AppState::new` 里安装一次，与 `agent::image_store` 同一套惯例。
+static GLOBAL: std::sync::OnceLock<DataChangeBus> = std::sync::OnceLock::new();
+
+/// 安装进程级总线（重复调用忽略，只有第一次生效）。
+pub fn install_global(bus: DataChangeBus) {
+    let _ = GLOBAL.set(bus);
+}
+
+/// 从底层模块通报某份数据变了；没安装过总线时静默。
+pub fn publish_global(source: DataSourceId) {
+    if let Some(bus) = GLOBAL.get() {
+        bus.publish(source);
+    }
+}
+
 impl DataChangeBus {
     pub fn new() -> Self {
         let (tx, _rx) = broadcast::channel(BUS_CAPACITY);
