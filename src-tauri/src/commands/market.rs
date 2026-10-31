@@ -293,6 +293,9 @@ pub fn raw_file_urls(owner: &str, repo: &str, file: &str, mirror: Option<&str>) 
             prefix, owner, repo, file
         ));
     }
+    // 用户自选的镜像可能就在内置列表里：去掉重复，避免同一个地址连打两次。
+    let mut seen = std::collections::HashSet::new();
+    urls.retain(|u| seen.insert(u.clone()));
     urls
 }
 
