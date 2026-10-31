@@ -252,7 +252,7 @@ pub fn index_urls(mirror: Option<&str>) -> Vec<String> {
         MirrorKind::None => {}
     }
     for default in DEFAULT_INDEX_SOURCES {
-        if !urls.iter().any(|u| u == default) {
+        if !urls.iter().any(|u| u.as_str() == *default) {
             urls.push((*default).to_string());
         }
     }
