@@ -133,12 +133,19 @@ jobs:
             "${{ secrets.ANDROID_KEY_ALIAS }}" \
             "${{ secrets.ANDROID_KEY_PASSWORD }}" \
             > src-tauri/gen/android/app/key.properties
+      # 仓库里 gradle wrapper 指向腾讯镜像（国内用户友好），但 GitHub runner 上偶发超时：
+      # 实测报 `Downloading from https://mirrors.cloud.tencent.com/gradle/... failed: timeout`。
+      # CI 里临时改成官方源（只改工作区，不回写仓库）。
       - name: 构建 APK
         run: |
           export ANDROID_HOME="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           export NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
           echo "ANDROID_HOME=$ANDROID_HOME"
-          pnpm tauri android build --apk --target aarch64
+          sed -i 's#mirrors\.cloud\.tencent\.com/gradle#services.gradle.org/distributions#' \
+            src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties
+          pnpm tauri android build --apk --target aarch64 || \
+            (echo '首次构建失败，重试一次（Gradle 发行版下载偶发超时）' && \
+             pnpm tauri android build --apk --target aarch64)
       - name: 核对 R8 没删 JNI 入口
         run: grep -E 'installUpdateApk|networkMetered' src-tauri/gen/android/app/build/outputs/mapping/universalRelease/mapping.txt
       - uses: actions/upload-artifact@v4
