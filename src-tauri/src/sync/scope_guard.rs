@@ -424,11 +424,7 @@ fn the_known_machine_local_fields_are_marked_local() {
             &[Seg::key("connections"), Seg::id("c1"), Seg::key("keyPath")],
             "connections/*/keyPath",
         ),
-        (
-            &scopes::CONNECTIONS_RULES,
-            &[Seg::key("connections"), Seg::id("c1"), Seg::key("keyId")],
-            "connections/*/keyId",
-        ),
+
         (
             &scopes::CONNECTIONS_RULES,
             &[
@@ -466,6 +462,20 @@ fn the_known_machine_local_fields_are_marked_local() {
         );
     }
     let _ = k;
+    // keyId / jumpKeyId 是**刻意 Shared** 的：机密同步会用同一个 id 把私钥本身带过去
+    // （`SecretsAdapter` + `key_store::import_with_id`）。只同步引用或只同步私钥，
+    // 都会让对端变成「用私钥认证、却没有钥匙」。
+    for seg in ["keyId", "jumpKeyId"] {
+        assert_eq!(
+            scopes::CONNECTIONS_RULES.scope_of(&[
+                Seg::key("connections"),
+                Seg::id("c1"),
+                Seg::key(seg),
+            ]),
+            Scope::Shared,
+            "connections/*/{seg} 必须与私钥同步一起走"
+        );
+    }
     // 平台字段：两个平台各一份，互相不覆盖
     for name in ["fontSize", "notificationSettings", "mobileNotificationSettings"] {
         assert_eq!(
