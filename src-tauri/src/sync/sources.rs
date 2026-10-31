@@ -779,6 +779,24 @@ impl SourceAdapter for SecretsAdapter {
                 Err(e) => log::warn!("同步：读取{}失败，本轮跳过：{}", slot.describe(), e),
             }
         }
+        // 导入的私钥也一起走：它们不是密钥链条目，而是本机主密钥加密的文件，
+        // 这里读出明文（文档本身是端到端加密的），对端用**它自己的**主密钥重新加密落盘。
+        // 带 passphrase 的私钥没法在没有密码的情况下重新导入（要解出指纹），跳过并告警。
+        for meta in crate::ssh::key_store::list() {
+            if meta.encrypted {
+                log::warn!("同步：私钥「{}」带 passphrase，未同步（请在其它设备手动导入）", meta.name);
+                continue;
+            }
+            match crate::ssh::key_store::load_pem(&meta.id) {
+                Ok(pem) => items.push(serde_json::json!({
+                    "kind": "sshKey",
+                    "id": meta.id,
+                    "name": meta.name,
+                    "value": pem.as_str(),
+                })),
+                Err(e) => log::warn!("同步：读取私钥「{}」失败：{}", meta.name, e),
+            }
+        }
         Ok(serde_json::json!({ "slots": items }))
     }
 
@@ -797,6 +815,17 @@ impl SourceAdapter for SecretsAdapter {
             let kind = item.get("kind").and_then(Value::as_str).unwrap_or_default();
             let id = item.get("id").and_then(Value::as_str).unwrap_or_default();
             let value = item.get("value").and_then(Value::as_str).unwrap_or_default();
+            if kind == "sshKey" {
+                // 私钥：按远端 id 落库，连接里的 keyId 才能对上。已存在则幂等跳过。
+                if crate::ssh::key_store::get(id).is_none() {
+                    let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
+                    match crate::ssh::key_store::import_with_id(id, value, name, None) {
+                        Ok(_) => committed = true,
+                        Err(e) => log::warn!("同步：导入私钥 {id} 失败：{}", e),
+                    }
+                }
+                continue;
+            }
             let Some(slot) = slot_from_tag(kind, id) else {
                 log::warn!("同步：收到不认识的机密类型 {kind}（id={id}），已忽略");
                 continue;

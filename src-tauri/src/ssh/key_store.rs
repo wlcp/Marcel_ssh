@@ -115,6 +115,16 @@ pub fn import_text(
     store().import_text(text, name, origin_path, passphrase)
 }
 
+/// 按**指定 id** 导入（机密同步落地用）。已存在同 id 时幂等返回，不覆盖本机内容。
+pub fn import_with_id(
+    id: &str,
+    text: &str,
+    name: &str,
+    passphrase: Option<&str>,
+) -> Result<StoredKeyMeta, AppError> {
+    store().import_with_id(id, text, name, passphrase)
+}
+
 /// 列出已导入的私钥（导入顺序，即界面展示顺序）。
 pub fn list() -> Vec<StoredKeyMeta> {
     store().load_index().keys
@@ -320,6 +330,29 @@ impl KeyStore {
         origin_path: Option<&str>,
         passphrase: Option<&str>,
     ) -> Result<StoredKeyMeta, AppError> {
+        self.import_inner(None, text, name, origin_path, passphrase)
+    }
+
+    /// 按**指定 id** 导入（机密同步用）：连接里的 `keyId` 是跨设备同步的引用，
+    /// 对端必须用同一个 id 落库，否则连接会指向一把不存在的钥匙。
+    fn import_with_id(
+        &self,
+        id: &str,
+        text: &str,
+        name: &str,
+        passphrase: Option<&str>,
+    ) -> Result<StoredKeyMeta, AppError> {
+        self.import_inner(Some(id), text, name, None, passphrase)
+    }
+
+    fn import_inner(
+        &self,
+        forced_id: Option<&str>,
+        text: &str,
+        name: &str,
+        origin_path: Option<&str>,
+        passphrase: Option<&str>,
+    ) -> Result<StoredKeyMeta, AppError> {
         if text.len() > key_material::MAX_KEY_BYTES {
             return Err(key_error(
                 KeyAuthCode::UnsupportedKey,
@@ -338,9 +371,21 @@ impl KeyStore {
 
         let mut index = self.load_index();
 
+        // 同步来的条目带的是远端 id：已存在就原样返回（幂等），不要另建一条；
+        // 手工导入（forced_id = None）才按指纹去重。
+        if let Some(id) = forced_id {
+            if let Some(existing) = index.keys.iter().find(|k| k.id == id) {
+                return Ok(existing.clone());
+            }
+        }
         // 同一把钥匙按指纹去重：重复导入不堆两份。来源变了就顺手更新来源
         // （密钥在磁盘上被挪过位置是常事），名字与 id 保持不变以免打断已有连接。
-        if let Some(existing) = index.keys.iter_mut().find(|k| k.fingerprint == fingerprint) {
+        // 只在手工导入时按指纹去重（forced id 已在上面的幂等分支处理）。
+        if let Some(existing) = index
+            .keys
+            .iter_mut()
+            .find(|k| forced_id.is_none() && k.fingerprint == fingerprint)
+        {
             let mut changed = false;
             if let Some(origin) = origin_path {
                 if existing.origin_path.as_deref() != Some(origin) {
@@ -355,7 +400,9 @@ impl KeyStore {
             return Ok(meta);
         }
 
-        let id = Uuid::new_v4().simple().to_string();
+        let id = forced_id
+            .map(str::to_string)
+            .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
         let master = master_key()?;
         let envelope = seal_envelope(&master, &id, text)?;
         write_private(&self.key_file_path(&id), &envelope)?;

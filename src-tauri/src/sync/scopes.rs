@@ -78,16 +78,20 @@ fn connection_filter(element: &Value) -> Option<&'static [&'static str]> {
 
 /// `connections.json`。
 ///
-/// Local：`keyPath` `jumpKeyPath`（本机私钥文件路径）、`keyId` `jumpKeyId`（本机私钥库里的 id，
-/// 私钥库由本机主密钥加密，换设备解不开）、`lastConnected`（每次连接都会变的流水，同步它只会制造
-/// 无谓的冲突与噪音）；`mcp-temp-` 开头的临时连接整条 Local。其余（地址、端口、用户名、认证方式、
-/// 跳板机配置、分组与顺序……）Shared。密码与私钥口令在密钥链里，一期不同步。
+/// Local：`keyPath` `jumpKeyPath`（**本机**私钥文件路径）、`lastConnected`（每次连接都会变的
+/// 流水，同步它只会制造无谓的冲突与噪音）；`mcp-temp-` 开头的临时连接整条 Local。
+///
+/// Shared：`keyId` `jumpKeyId`——它们指向密钥库里的条目 id，而机密同步（`syncSecrets`，默认关）
+/// 会用同一个 id 把私钥本身也带过去（`SecretsAdapter`）。只同步引用不同步私钥的话，对端就是
+/// 「用私钥认证但没有钥匙」；只同步私钥不同步引用则连接指不到它。两者必须一起走。
 pub static CONNECTIONS_RULES: ScopeRules = ScopeRules {
     patterns: &[
         ("connections/*/keyPath", Scope::Local),
         ("connections/*/jumpKeyPath", Scope::Local),
-        ("connections/*/keyId", Scope::Local),
-        ("connections/*/jumpKeyId", Scope::Local),
+        // 与机密同步配套：私钥按同一个 id 落到对端（见 `SecretsAdapter`），
+        // 不同步这个引用，对端的连接就会「有认证方式、没有钥匙」。
+        ("connections/*/keyId", Scope::Shared),
+        ("connections/*/jumpKeyId", Scope::Shared),
         ("connections/*/lastConnected", Scope::Local),
     ],
     item_filters: &[ItemFilter {
