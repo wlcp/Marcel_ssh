@@ -805,6 +805,10 @@ pub struct AppSettings {
     /// 多渠道多模型注册表（渠道/模型/场景槽位）。旧 `llm_config` 迁移后恒为 None。
     #[serde(default)]
     pub llm_registry: LlmRegistry,
+    /// 机密同步开关（API Key / 连接密码 / 私钥口令）。**默认关**：
+    /// 打开后这些凭据会跟着同一个恢复密钥走，恢复密钥泄露 = 全部凭据泄露。
+    #[serde(default)]
+    pub sync_secrets: bool,
     #[serde(default)]
     pub agent_mode_settings: AgentModeSettings,
     #[serde(default)]
@@ -995,6 +999,7 @@ impl Default for AppSettings {
             disable_all_injections: false,
             fold_completed_turns: true,
             privacy_mode: false,
+            sync_secrets: false,
             update_mode: UpdateMode::Auto,
             auto_update: default_true(),
         }

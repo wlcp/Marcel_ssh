@@ -26,7 +26,7 @@ use crate::config::keychain::SecretSlot;
 use crate::config::persist::JsonPersistable;
 use crate::config::quick_commands::QuickCommandStore;
 use crate::config::settings::AppSettings;
-use crate::data::{DataSourceId, JsonStore};
+use crate::data::{DataSourceId, JsonStore, SyncTier};
 use crate::error::AppError;
 use crate::mcp::manager::McpManager;
 use crate::mcp::store::McpServerStore;
@@ -500,7 +500,9 @@ pub fn build_adapters(
         )),
         Arc::new(JsonSourceAdapter::new(
             stores.connections.clone(),
-            Some(Arc::new(ConnectionsPostApply { secrets })),
+            Some(Arc::new(ConnectionsPostApply {
+                secrets: secrets.clone(),
+            })),
         )),
         Arc::new(JsonSourceAdapter::new(
             stores.quick_commands.clone(),
@@ -514,6 +516,12 @@ pub fn build_adapters(
             })),
         )),
         Arc::new(KnownHostsAdapter::new(stores.known_hosts.clone())),
+        // 机密放最后：它是唯一「没有磁盘文件」的源，日志里排在配置之后更好读。
+        Arc::new(SecretsAdapter::new(
+            secrets,
+            stores.settings.clone(),
+            stores.connections.clone(),
+        )),
     ]
 }
 
@@ -643,5 +651,168 @@ mod tests {
             .filter_map(|id| id.sync_key())
             .collect();
         assert_eq!(keys.len(), 6);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 机密（系统密钥链）：没有磁盘文件，读 = 现从密钥链导出，写 = 回写密钥链
+// ---------------------------------------------------------------------------
+
+/// 机密同步源在远端文档里的 key（写进远端文件名，跨版本稳定，不可改）。
+const SECRETS_SYNC_KEY: &str = "secrets";
+
+/// 槽位 → 文档里的 `(kind, id)`。**不写 `_ =>`**：新增槽位必须在这里表态，
+/// 否则机密同步会静默漏掉它。Local 档（同步自己的密钥、私钥库主密钥）返回 None。
+fn slot_tag(slot: &SecretSlot) -> Option<(&'static str, String)> {
+    match slot {
+        SecretSlot::LegacyLlmApiKey => Some(("legacyLlm", String::new())),
+        SecretSlot::LlmChannel(id) => Some(("llmChannel", id.clone())),
+        SecretSlot::WebSearchApiKey => Some(("webSearch", String::new())),
+        SecretSlot::DeepseekToolsApiKey => Some(("deepseekTools", String::new())),
+        SecretSlot::CustomSearchApiKey => Some(("customSearch", String::new())),
+        SecretSlot::CustomFetchApiKey => Some(("customFetch", String::new())),
+        SecretSlot::TavilyFetchApiKey => Some(("tavilyFetch", String::new())),
+        SecretSlot::JevApiKey => Some(("jev", String::new())),
+        SecretSlot::SshPassword(id) => Some(("sshPassword", id.clone())),
+        SecretSlot::SshKeyPassphrase(id) => Some(("sshKeyPassphrase", id.clone())),
+        SecretSlot::JumpPassword(id) => Some(("jumpPassword", id.clone())),
+        SecretSlot::JumpKeyPassphrase(id) => Some(("jumpKeyPassphrase", id.clone())),
+        // 以下都是 Local 档：同步自己的密钥与私钥库主密钥，绝不出本机。
+        SecretSlot::KeyStoreMaster
+        | SecretSlot::SyncDataKey
+        | SecretSlot::SyncRecoveryKey
+        | SecretSlot::SyncStoragePassword
+        | SecretSlot::LegacySyncKey
+        | SecretSlot::LegacySyncDeviceApiKey
+        | SecretSlot::LegacySyncDeviceId
+        | SecretSlot::LegacySyncServerUrl => None,
+    }
+}
+
+fn slot_from_tag(kind: &str, id: &str) -> Option<SecretSlot> {
+    let slot = match kind {
+        "legacyLlm" => SecretSlot::LegacyLlmApiKey,
+        "llmChannel" => SecretSlot::LlmChannel(id.to_string()),
+        "webSearch" => SecretSlot::WebSearchApiKey,
+        "deepseekTools" => SecretSlot::DeepseekToolsApiKey,
+        "customSearch" => SecretSlot::CustomSearchApiKey,
+        "customFetch" => SecretSlot::CustomFetchApiKey,
+        "tavilyFetch" => SecretSlot::TavilyFetchApiKey,
+        "jev" => SecretSlot::JevApiKey,
+        "sshPassword" => SecretSlot::SshPassword(id.to_string()),
+        "sshKeyPassphrase" => SecretSlot::SshKeyPassphrase(id.to_string()),
+        "jumpPassword" => SecretSlot::JumpPassword(id.to_string()),
+        "jumpKeyPassphrase" => SecretSlot::JumpKeyPassphrase(id.to_string()),
+        _ => return None,
+    };
+    Some(slot)
+}
+
+/// 机密同步适配器：文档形状 `{ "slots": [{ kind, id, value }] }`。
+///
+/// 两个刻意的选择：
+/// 1. **永不按文档删除本机凭据**——远端少一条只可能是那台设备没有（没装这个渠道、
+///    没保存这个连接），不代表用户要删密码。真正的清理跟着渠道/连接删除走
+///    （`SettingsPostApply` / `ConnectionsPostApply`）。
+/// 2. 值相同就不回写密钥链：避免每次同步都触发系统钥匙串读写与授权弹窗。
+pub struct SecretsAdapter {
+    secrets: Arc<dyn SyncSecretStore>,
+    settings: JsonStore<AppSettings>,
+    connections: JsonStore<ConnectionStore>,
+}
+
+impl SecretsAdapter {
+    pub fn new(
+        secrets: Arc<dyn SyncSecretStore>,
+        settings: JsonStore<AppSettings>,
+        connections: JsonStore<ConnectionStore>,
+    ) -> Self {
+        Self { secrets, settings, connections }
+    }
+
+    /// 本机当前该参与同步的全部槽位：固定槽位 + 每个渠道 + 每个连接名下四个。
+    async fn candidate_slots(&self) -> Vec<SecretSlot> {
+        let settings = self.settings.snapshot().await;
+        let connections = self.connections.snapshot().await;
+        let mut slots: Vec<SecretSlot> = SecretSlot::fixed_slots()
+            .into_iter()
+            .filter(|s| s.tier() == SyncTier::Secret)
+            .collect();
+        for channel in &settings.llm_registry.channels {
+            slots.push(SecretSlot::LlmChannel(channel.id.clone()));
+        }
+        for conn in &connections.connections {
+            slots.extend(SecretSlot::for_connection(&conn.id));
+        }
+        slots
+    }
+}
+
+#[async_trait]
+impl SourceAdapter for SecretsAdapter {
+    fn key(&self) -> &'static str {
+        SECRETS_SYNC_KEY
+    }
+
+    fn data_source(&self) -> DataSourceId {
+        DataSourceId::Secrets
+    }
+
+    fn rules(&self) -> &'static ScopeRules {
+        // 整份文档本来就是加密上传的，逐字段不再分档；开关在设置里（默认关）。
+        &ScopeRules::SHARED_ALL
+    }
+
+    async fn read_json(&self) -> Result<Value, AppError> {
+        let mut items = Vec::new();
+        for slot in self.candidate_slots().await {
+            let Some((kind, id)) = slot_tag(&slot) else {
+                continue;
+            };
+            match self.secrets.get(&slot) {
+                Ok(Some(value)) if !value.is_empty() => items.push(serde_json::json!({
+                    "kind": kind,
+                    "id": id,
+                    "value": value,
+                })),
+                Ok(_) => {}
+                Err(e) => log::warn!("同步：读取{}失败，本轮跳过：{}", slot.describe(), e),
+            }
+        }
+        Ok(serde_json::json!({ "slots": items }))
+    }
+
+    async fn update(&self, f: UpdateFn<'_>) -> Result<AdapterUpdate, AppError> {
+        let before = self.read_json().await?;
+        let Some(next) = f(&before)? else {
+            return Ok(AdapterUpdate { committed: false, json: before.clone(), before });
+        };
+        let mut committed = false;
+        let items = next
+            .get("slots")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for item in items {
+            let kind = item.get("kind").and_then(Value::as_str).unwrap_or_default();
+            let id = item.get("id").and_then(Value::as_str).unwrap_or_default();
+            let value = item.get("value").and_then(Value::as_str).unwrap_or_default();
+            let Some(slot) = slot_from_tag(kind, id) else {
+                log::warn!("同步：收到不认识的机密类型 {kind}（id={id}），已忽略");
+                continue;
+            };
+            if slot.tier() != SyncTier::Secret {
+                continue;
+            }
+            match self.secrets.get(&slot) {
+                Ok(Some(current)) if current == value => {}
+                _ => {
+                    self.secrets.set(&slot, value)?;
+                    committed = true;
+                }
+            }
+        }
+        let after = self.read_json().await?;
+        Ok(AdapterUpdate { committed, json: after, before })
     }
 }

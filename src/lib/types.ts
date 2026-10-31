@@ -1063,6 +1063,8 @@ export interface AppSettings {
    *  descriptions, etc.). The actual SSH connection still uses the real
    *  values — only their on-screen display is masked. */
   privacyMode: boolean;
+  /** 机密同步开关（API Key / 连接密码 / 私钥口令）。默认关。 */
+  syncSecrets?: boolean;
   /**
    * 归档会话保留天数（**0 = 永不清理**），默认 30。
    * 归档项超过这个天数后，启动时由前端调用 `agent_purge_expired_archived` 永久删除。

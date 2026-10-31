@@ -456,12 +456,23 @@ impl SyncEngine {
         }
     }
 
+    /// 机密同步默认关：关着时整个机密源不参与捕获 / 落地 / 首次上传。
+    async fn source_enabled(&self, id: DataSourceId) -> bool {
+        if id.tier() != crate::data::SyncTier::Secret {
+            return true;
+        }
+        self.deps.settings.snapshot().await.sync_secrets
+    }
+
     /// 对每个源捕获一次本机改动。
     async fn capture_all(&mut self) -> Result<(), AppError> {
         let wall = self.now_ms();
         let platform = self.deps.platform;
         let adapters = self.deps.adapters.clone();
         for adapter in &adapters {
+            if !self.source_enabled(adapter.data_source()).await {
+                continue;
+            }
             let key = adapter.key();
             if self.ledger.is_restoring(key) {
                 continue; // 等恢复落地，不能把「全变成默认值」推出去
@@ -629,6 +640,9 @@ impl SyncEngine {
         let mut errors = Vec::new();
         let adapters = self.deps.adapters.clone();
         for adapter in adapters {
+            if !self.source_enabled(adapter.data_source()).await {
+                continue;
+            }
             let key = adapter.key();
             if !self.ledger.needs_apply(key) {
                 continue;
@@ -1044,6 +1058,9 @@ impl SyncEngine {
         let wall = self.now_ms();
         let platform = self.deps.platform;
         for adapter in self.deps.adapters.clone() {
+            if !self.source_enabled(adapter.data_source()).await {
+                continue;
+            }
             let key = adapter.key();
             let doc = adapter.read_json().await?;
             let ledger = &mut self.ledger;

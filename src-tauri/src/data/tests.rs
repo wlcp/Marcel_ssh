@@ -42,7 +42,7 @@ fn key_store_is_local_only() {
 fn registry_snapshot_pins_paths_and_tiers() {
     use DataSourceId::*;
     use SourceKind::{Dir, File};
-    use SyncTier::{Config, Conversation, Local};
+    use SyncTier::{Config, Conversation, Local, Secret};
     let table: &[(DataSourceId, &str, SourceKind, SyncTier, BaseDir)] = &[
         (Settings, "settings.json", File, Config, BaseDir::Config),
         (
@@ -87,6 +87,7 @@ fn registry_snapshot_pins_paths_and_tiers() {
         (JobLedger, "jobs.json", File, Local, BaseDir::Config),
         (JobsTemp, "jobs_temp", Dir, Local, BaseDir::Config),
         (LocalCommand, "local_command", Dir, Local, BaseDir::Config),
+        (Secrets, "secrets", Dir, Secret, BaseDir::Config),
         (Plugins, "plugins", Dir, Local, BaseDir::Config),
         (Previews, "marcel-previews", Dir, Local, BaseDir::AppData),
         (SysopenTemp, "marcel-sysopen", Dir, Local, BaseDir::AppData),

@@ -101,6 +101,9 @@ data_sources! {
     McpServers,
     /// `known_hosts.json`：SSH 主机密钥指纹（TOFU）。
     KnownHosts,
+    /// 机密（API Key / 连接密码 / 私钥口令）：不存在磁盘文件，读写都走系统密钥链。
+    /// 单独开关（`syncSecrets`，默认关），只有用户显式打开才参与同步。
+    Secrets,
     /// `keys/`：导入的 SSH 私钥库（密文）。
     KeyStore,
     /// `conversations.db`：Agent 对话库。
@@ -174,6 +177,16 @@ impl DataSourceId {
                 rel_path: "known_hosts.json",
                 kind: File,
                 describe: "SSH 主机密钥指纹（首次信任后的校验依据）",
+            },
+            // 机密没有磁盘文件：内容由 `SecretsAdapter` 现从系统密钥链读出、
+            // 加密后上传；这里的 rel_path 只是登记表要一个唯一名字，任何代码都
+            // 不该按它去读写文件。
+            DataSourceId::Secrets => SourceSpec {
+                tier: Secret,
+                base: BaseDir::Config,
+                rel_path: "secrets",
+                kind: Dir,
+                describe: "机密（API Key / 连接密码 / 私钥口令，走密钥链）",
             },
             // 私钥密文用**本机**主密钥（系统密钥链里的 keys:master）加密，换设备解不开，
             // 所以不能当普通配置同步；以后机密同步另走密钥链导出。
@@ -305,6 +318,7 @@ impl DataSourceId {
             DataSourceId::McpServers => Some("mcpServers"),
             DataSourceId::KnownHosts => Some("knownHosts"),
             DataSourceId::KeyStore
+            | DataSourceId::Secrets
             | DataSourceId::Conversations
             | DataSourceId::Images
             | DataSourceId::Memory

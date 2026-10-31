@@ -5,6 +5,7 @@ import { useConnectionStore } from '@/stores/connectionStore';
 import { describeStorage, describeSyncStatus, type WizardMode } from '@/lib/syncModel';
 import type { SyncStatus } from '@/lib/types';
 import { getErrorMessage } from '@/lib/errors';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { SyncWizard } from './SyncWizard';
 import { SyncHeldBanner } from './SyncHeldBanner';
 import { SyncStopDialog } from './SyncStopDialog';
@@ -27,8 +28,17 @@ function useNow(intervalMs: number): Date {
   return now;
 }
 
-/** 同步范围：一期只有"普通配置"，其余两项先摆出来说明去向，别让人以为漏了。 */
+/**
+ * 同步范围：
+ * - 普通配置：始终同步（作用域规则见后端 `sync/scopes.rs`，快照由 scope_guard 钉死）；
+ * - 机密：单独开关，默认关。打开后 API Key / 连接密码 / 私钥口令会进同一个加密信封，
+ *   恢复密钥泄露即全部凭据泄露，所以文案必须写明。
+ * 对话与记忆刻意不同步（体积、冲突、设备相关性都不划算）。
+ */
 function ScopeList() {
+  const settings = useSettingsStore((s) => s.settings);
+  const update = useSettingsStore((s) => s.update);
+  const secretsOn = settings?.syncSecrets ?? false;
   const items = [
     {
       key: 'config',
@@ -37,9 +47,20 @@ function ScopeList() {
         '连接、设置、快捷命令、技能、MCP 服务、已知主机指纹；本机文件路径与可能含凭据的请求头只留在本机',
       checked: true,
       note: '始终开启',
+      disabled: true,
+      onChange: () => {},
     },
-    { key: 'memory', title: '对话与记忆', desc: 'Agent 对话记录与长期记忆', checked: false, note: '后续版本支持' },
-    { key: 'secrets', title: '机密', desc: '密码、私钥、API Key', checked: false, note: '后续版本支持' },
+    {
+      key: 'secrets',
+      title: '机密',
+      desc: secretsOn
+        ? 'API Key、连接密码、私钥口令 · 与配置同一个恢复密钥保护'
+        : 'API Key、连接密码、私钥口令 · 默认不同步',
+      checked: secretsOn,
+      note: secretsOn ? '已开启' : '关闭',
+      disabled: false,
+      onChange: (next: boolean) => update({ syncSecrets: next }),
+    },
   ];
   return (
     <ul className="space-y-3">
@@ -51,7 +72,12 @@ function ScopeList() {
               {item.desc} · {item.note}
             </div>
           </div>
-          <Toggle checked={item.checked} onChange={() => {}} disabled size="sm" />
+          <Toggle
+            checked={item.checked}
+            onChange={item.onChange}
+            disabled={item.disabled}
+            size="sm"
+          />
         </li>
       ))}
     </ul>
