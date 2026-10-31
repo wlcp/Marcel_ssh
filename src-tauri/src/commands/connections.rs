@@ -152,6 +152,19 @@ pub async fn config_delete_connection(
     id: String,
     delete_memories: Option<bool>,
 ) -> Result<(), AppError> {
+    // 同步的存储位置（SFTP）是按连接 id 引用的：删掉这台连接 = 同步从此连不上，
+    // 而且旧实现没有「更换存储位置」的入口，用户只能停止同步再重新加入。
+    // 这里直接拦住，把话说在前面。
+    if let Some(crate::sync::storage::StorageConfig::Sftp { connection_id, .. }) =
+        state.sync.status().storage.as_ref()
+    {
+        if connection_id == &id {
+            return Err(AppError::Config(
+                "这台连接正在被「跨设备同步」用作存储位置：请先到「设置 → 同步」停止同步（或换成其它存储位置），再删除它。"
+                    .into(),
+            ));
+        }
+    }
     state
         .connection_store
         .mutate(|store| {

@@ -96,7 +96,7 @@ impl SftpConnector for SavedConnectionConnector {
         }
         .ok_or_else(|| {
             AppError::Config(
-                "同步用的服务器连接已经被删除了，请在同步设置里重新选择存储位置。".into(),
+                "同步用的服务器连接已经被删除了：请到「设置 → 同步」停止同步，再用同步码重新加入（会重建这台连接）。".into(),
             )
         })?;
         let mut config =

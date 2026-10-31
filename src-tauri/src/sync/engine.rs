@@ -1518,7 +1518,12 @@ pub async fn build_sync_code(
             .await
             .get_by_id(connection_id)
             .cloned()
-            .ok_or_else(|| AppError::Other("同步用的服务器连接已经被删除了。".into()))?;
+            .ok_or_else(|| {
+                AppError::Other(
+                    "同步用的服务器连接已经被删除了：请到「设置 → 同步」停止同步，再用同步码重新加入。"
+                        .into(),
+                )
+            })?;
         if connection.auth_method == "Password" {
             if let Some(pw) = deps.secrets.get(&SecretSlot::SshPassword(connection_id.clone()))? {
                 secret = Zeroizing::new(pw);
