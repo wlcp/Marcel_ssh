@@ -1,11 +1,14 @@
 {
-    "version": "1.11.1",
-    "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.1",
+    "version": "1.11.2",
+    "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.2",
+    "installer_url": "https://github.com/wlcp/Marcel_ssh/releases/download/v1.11.2/Marcel-SSH-Self_1.11.2_x64-setup.exe",
+    "sha256": "8dfa44ec421bedef78f9f5a635010248e697e3e62c7a7b0879ab970c415a210a",
+    "size": 13853421,
     "android": {
-        "version": "1.11.1",
-        "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.1",
-        "installer_url": "https://github.com/wlcp/Marcel_ssh/releases/download/v1.11.1/Marcel-SSH-Self_1.11.1_arm64.apk",
-        "sha256": "5ab4349400fdba4e35ede3b5468fe1d43f01f3b1429e48c7bccc33e13099a97f",
-        "size": 32519263
+        "version": "1.11.2",
+        "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.2",
+        "installer_url": "https://github.com/wlcp/Marcel_ssh/releases/download/v1.11.2/Marcel-SSH-Self_1.11.2_arm64.apk",
+        "sha256": "656933eb7510700f8af0dea658245c631fdc3706b7136c456551026f981c8f76",
+        "size": 32536379
     }
 }
