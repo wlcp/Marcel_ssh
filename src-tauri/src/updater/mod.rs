@@ -48,7 +48,7 @@ mod notify;
 /// 仅 Windows 使用：Android 的 APK 由系统安装器强制校验签名与已装版本一致，
 /// 不走（也无法走）minisign 链。
 #[cfg(windows)]
-const UPDATE_PUBKEY_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDExQzlENTYxN0FBRDg3MUUKUldRZWg2MTZZZFhKRVNZOGh2OTNBY3JNT0NFYlV0Yy83SklLQTFVWThLUElDaEtLbWVaVE02OFQK";
+const UPDATE_PUBKEY_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUxMjI1Mjg1M0Q5OENDClJXVE1tRDJGVWlKUkFFMHdFc2IvOWJ1YVBxUUlBR01DQzBvaGR3N2Z2aUJVVkt1MkIwcnVPbkwwCg==";
 
 /// 启动后首次检查的延迟（秒）。
 const FIRST_CHECK_DELAY_SECS: u64 = 30;
