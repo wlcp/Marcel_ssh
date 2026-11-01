@@ -95,6 +95,32 @@ pub(crate) fn close_all_plugin_windows(app: &AppHandle) {
     }
 }
 
+/// 把窗口位置夹进主显示器可视范围（逻辑坐标）。拿不到显示器信息时原样返回。
+#[cfg(desktop)]
+fn clamp_to_primary_monitor(
+    app: &AppHandle,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    let Ok(Some(monitor)) = app.primary_monitor() else {
+        return (x, y);
+    };
+    let scale = if monitor.scale_factor() > 0.0 {
+        monitor.scale_factor()
+    } else {
+        1.0
+    };
+    let size = monitor.size();
+    let screen_w = size.width as f64 / scale;
+    let screen_h = size.height as f64 / scale;
+    // 留出 8px 边距：贴边时部分系统（任务栏 / 圆角）会裁掉内容。
+    let max_x = (screen_w - width).max(0.0);
+    let max_y = (screen_h - height).max(0.0);
+    (x.clamp(0.0, max_x), y.clamp(0.0, max_y))
+}
+
 #[cfg(desktop)]
 async fn auth_context(
     state: &State<'_, AppState>,
@@ -227,6 +253,17 @@ pub async fn plugin_window_create(
         return Err(AppError::Other(format!("plugin disabled: {}", plugin_id)));
     }
 
+    // 位置夹紧到主显示器工作区内。插件常常把窗口默认放在右下角（桌宠就是
+    // x=1200,y=700），在小屏 / 高 DPI 缩放上算下来整扇窗落在屏幕外——窗口确实
+    // 建出来了，用户却什么都看不到，而且它 skip_taskbar + 无边框，连拖回来都做不到。
+    let (pos_x, pos_y) = clamp_to_primary_monitor(&app, params.x, params.y, params.width, params.height);
+    if (pos_x, pos_y) != (params.x, params.y) {
+        log::info!(
+            "插件窗口 {} 位置越界，已夹紧: ({}, {}) → ({}, {})",
+            params.label, params.x, params.y, pos_x, pos_y
+        );
+    }
+
     let url = format!("plugin://{}/{}", plugin_id, params.entry);
     let webview_url =
         WebviewUrl::External(url::Url::parse(&url).map_err(|e| AppError::Other(e.to_string()))?);
@@ -238,13 +275,14 @@ pub async fn plugin_window_create(
     let mut builder = WebviewWindowBuilder::new(&app, &label, webview_url)
         .title("")
         .inner_size(params.width.max(1.0), params.height.max(1.0))
-        .position(params.x, params.y)
+        .position(pos_x, pos_y)
         .decorations(params.decorations)
         .transparent(params.transparent)
         .shadow(params.shadow)
         .always_on_top(params.always_on_top)
         .skip_taskbar(params.skip_taskbar)
         .resizable(params.resizable)
+        .visible(true)
         .focused(true);
     // 透明窗口需显式把 webview 背景设为透明（Windows 上 background_color 的
     // alpha=0 才让 webview layer 透明，否则默认白底导致方框）。
