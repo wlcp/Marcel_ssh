@@ -75,8 +75,13 @@ impl LocalHandler for FsReadHandler {
             .ok_or_else(|| AppError::Other("fs.read 缺少 __plugin_id".into()))?;
 
         let file_path = resolve_read_path(&ctx.config_dir, plugin_id, path)?;
-        let content = std::fs::read_to_string(&file_path)
-            .map_err(|e| AppError::Other(format!("读取文件失败: {}", e)))?;
+        // 文件不存在 = 空内容：插件读「还没创建的数据文件」是正常路径
+        // （长期记忆插件的 memories/<host>.jsonl 契约就是如此），不是错误。
+        let content = match std::fs::read_to_string(&file_path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(AppError::Other(format!("读取文件失败: {}", e))),
+        };
         Ok(json!({ "content": content }))
     }
 }

@@ -192,8 +192,12 @@ async fn execute_command<R: Runtime>(
             let config_dir = config_dir_for(app);
             let file_path =
                 resolve_read_path(&config_dir, plugin_id, path).map_err(|e| e.to_string())?;
-            let content =
-                std::fs::read_to_string(&file_path).map_err(|e| format!("read failed: {}", e))?;
+            // 不存在 = 空字符串（与本地 handler / 命令保持一致）
+            let content = match std::fs::read_to_string(&file_path) {
+                Ok(c) => c,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(e) => return Err(format!("read failed: {}", e)),
+            };
             Ok(serde_json::Value::String(content))
         }
         "plugin_fs_write" | "fs.write" => {

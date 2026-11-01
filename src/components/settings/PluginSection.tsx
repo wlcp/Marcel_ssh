@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronRight, Puzzle, Eye, Wrench, Shield, FolderOpen, Check, Settings, Syringe, AlertCircle, RotateCw, Trash2, ArrowUpCircle } from 'lucide-react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { subscribeTauriEventReady } from '@/lib/tauriEvent';
-import { getPluginDir, openPluginDir, pluginUninstall, pluginUpdate, pluginInstallCancel } from '@/lib/tauri';
+import { getPluginDir, openPluginDir, pluginInstall, pluginUninstall, pluginUpdate, pluginInstallCancel, restartApp } from '@/lib/tauri';
 import { usePluginStore } from '@/stores/pluginStore';
 import { useMarketStore } from '@/stores/marketStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -18,6 +18,7 @@ import Modal from '@/components/ui/Modal';
 import InstallOverlay, { type InstallOverlayStatus, type InstallOverlayProgress } from '@/components/market/InstallOverlay';
 import { useSettingsActions } from './SettingsActionsContext';
 import { Card, SettingItem } from './helpers';
+import Input from '@/components/ui/Input';
 import PluginConfigModal from './PluginConfigModal';
 import { usePluginUpdates } from '@/hooks/usePluginUpdates';
 
@@ -646,6 +647,30 @@ export function PluginSection() {
   const [pluginDir, setPluginDir] = useState('');
   const [copied, setCopied] = useState(false);
   const [globalRestartHint, setGlobalRestartHint] = useState<{ kind: 'enable' | 'disable'; name: string } | null>(null);
+  // 从仓库地址直接安装：市场索引里的 repoUrl 可能过期（插件改名/迁移），
+  // 手头有正确地址时不该被索引卡住。
+  const [repoInput, setRepoInput] = useState('');
+  const [repoInstalling, setRepoInstalling] = useState(false);
+  const [repoInstallMsg, setRepoInstallMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const handleInstallFromRepo = useCallback(async () => {
+    const url = repoInput.trim().replace(/\/+$/, '');
+    if (!/^https:\/\/github\.com\/[^/]+\/[^/]+$/.test(url)) {
+      setRepoInstallMsg({ ok: false, text: '请填写形如 https://github.com/owner/repo 的仓库地址' });
+      return;
+    }
+    setRepoInstalling(true);
+    setRepoInstallMsg(null);
+    try {
+      await pluginInstall(url, crypto.randomUUID());
+      setRepoInstallMsg({ ok: true, text: '安装完成，重启应用后生效。' });
+    } catch (e) {
+      setRepoInstallMsg({ ok: false, text: getErrorMessage(e) });
+    } finally {
+      setRepoInstalling(false);
+    }
+  }, [repoInput]);
+
   const appVersion = useAppVersion();
 
   const injectionStatuses = useInjectionStatuses();
@@ -675,6 +700,50 @@ export function PluginSection() {
     <div className="space-y-6">
       {/* Plugin directory + refresh + safe mode */}
       <Card id="settings-plugins" title="插件" description="管理本地安装的插件与主界面注入">
+        <SettingItem
+          id="plugins-install-repo"
+          label="从 GitHub 仓库安装"
+          description="市场索引里的仓库地址失效时（例如插件改名了），可以直接贴仓库地址安装"
+          sectionId="settings-plugins"
+          keywords={['plugin', 'install', 'repo', 'github', '插件', '安装', '仓库']}
+        >
+          <div className="flex flex-col items-stretch gap-2 sm:items-end">
+            <div className="flex w-full gap-2 sm:w-auto">
+              <Input
+                value={repoInput}
+                onChange={(e) => {
+                  setRepoInput(e.target.value);
+                  setRepoInstallMsg(null);
+                }}
+                placeholder="https://github.com/owner/repo"
+                className="min-w-0 flex-1 sm:w-72"
+              />
+              <Button
+                size="sm"
+                onClick={() => void handleInstallFromRepo()}
+                disabled={repoInstalling || !repoInput.trim()}
+              >
+                {repoInstalling ? '安装中…' : '安装'}
+              </Button>
+            </div>
+            {repoInstallMsg && (
+              <p
+                className={`text-xs ${repoInstallMsg.ok ? 'text-emerald-400' : 'text-red-400'} break-all`}
+              >
+                {repoInstallMsg.text}
+                {repoInstallMsg.ok && (
+                  <button
+                    type="button"
+                    onClick={() => void restartApp().catch(() => {})}
+                    className="ml-2 underline underline-offset-2 hover:text-emerald-300"
+                  >
+                    立即重启
+                  </button>
+                )}
+              </p>
+            )}
+          </div>
+        </SettingItem>
         <SettingItem
           id="plugins-directory"
           label="插件目录"

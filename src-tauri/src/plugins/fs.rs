@@ -45,7 +45,11 @@ pub fn is_within_base(base_dir: &Path, candidate: &Path) -> bool {
 }
 
 /// Resolve a plugin-relative read path, rejecting path traversal.
-/// The file must already exist (canonicalize is used to normalise).
+///
+/// 文件**可以不存在**：插件读「还没创建的数据文件」是正常操作（长期记忆插件的
+/// `memories/<host>.jsonl` 首次读取就是这种情况，它的契约是「不存在返回空内容」）。
+/// 不存在时只校验**父目录**落在插件目录内，把路径原样返回，由调用方把
+/// `NotFound` 映射成空内容。
 pub fn resolve_read_path(
     config_dir: &Path,
     plugin_id: &str,
@@ -64,9 +68,23 @@ pub fn resolve_read_path(
         .map_err(|_| AppError::Other(format!("plugin directory not found: {}", plugin_id)))?;
 
     let candidate = plugin_dir.join(path);
-    let file_path = candidate
-        .canonicalize()
-        .map_err(|_| AppError::Other(format!("path not found: {}", path)))?;
+    let file_path = match candidate.canonicalize() {
+        Ok(p) => p,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // 文件不存在：校验父目录（必须存在且在插件目录内），路径原样交给调用方。
+            let parent = candidate.parent().unwrap_or(&candidate);
+            let canonical_parent = parent
+                .canonicalize()
+                .map_err(|_| AppError::Other(format!("path not found: {}", path)))?;
+            if !canonical_parent.starts_with(&base_dir) {
+                return Err(AppError::Other("path traversal rejected".into()));
+            }
+            return Ok(candidate);
+        }
+        Err(_) => {
+            return Err(AppError::Other(format!("path not found: {}", path)));
+        }
+    };
 
     if !file_path.starts_with(&base_dir) {
         return Err(AppError::Other("path traversal rejected".into()));

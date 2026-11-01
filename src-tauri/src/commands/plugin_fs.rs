@@ -12,8 +12,12 @@ pub async fn plugin_fs_read(
 ) -> Result<String, AppError> {
     let config_dir = state.config_dir.clone();
     let file_path = resolve_read_path(&config_dir, &plugin_id, &path)?;
-    std::fs::read_to_string(&file_path)
-        .map_err(|e| AppError::Other(format!("failed to read file: {}", e)))
+    // 不存在 = 空内容（与 `kind=local` 的 fs.read 保持一致）
+    match std::fs::read_to_string(&file_path) {
+        Ok(c) => Ok(c),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(AppError::Other(format!("failed to read file: {}", e))),
+    }
 }
 
 #[tauri::command]
