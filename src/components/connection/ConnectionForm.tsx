@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { JumpAuthMethod, SavedConnection, StoredKeyMeta } from '@/lib/types';
 import { DEFAULT_PORT } from '@/lib/constants';
 import * as tauri from '@/lib/tauri';
@@ -14,6 +14,7 @@ import { describeAlgorithm, shortFingerprint } from '@/lib/privateKey';
 import { useConnectionStore } from '@/stores/connectionStore';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import GroupInput from '@/components/ui/GroupInput';
 import Modal from '@/components/ui/Modal';
 import PasswordPrompt from './PasswordPrompt';
 import KeyManager from './KeyManager';
@@ -66,6 +67,15 @@ export default function ConnectionForm({
     null,
   );
   const [group, setGroup] = useState(connection?.group ?? '');
+  // 已有分组来自其它连接：输入时给候选，同时仍然允许直接敲一个新分组。
+  const savedConnections = useConnectionStore((s) => s.connections);
+  const groupOptions = useMemo(
+    () =>
+      [...new Set(savedConnections.map((c) => c.group?.trim()).filter((g): g is string => !!g))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [savedConnections],
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [passwordPromptOpen, setPasswordPromptOpen] = useState(false);
   /** 「重设密码」浮层上一次保存失败的原因（浮层留在原地让用户重试）。 */
@@ -516,12 +526,16 @@ export default function ConnectionForm({
         </>
       )}
 
-      <Input
-        label="分组（可选）"
-        value={group}
-        onChange={(e) => setGroup(e.target.value)}
-        placeholder="生产环境"
-      />
+      <div className="w-full">
+        <label className="mb-1 block text-sm font-medium text-zinc-300">分组（可选）</label>
+        <GroupInput
+          value={group}
+          onChange={setGroup}
+          groups={groupOptions}
+          placeholder={groupOptions.length > 0 ? '选择已有分组，或直接输入新分组' : '生产环境'}
+          className="w-full rounded-lg border border-edge bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500 focus:outline-none"
+        />
+      </div>
 
       {/* Jump host (ProxyJump) */}
       <div className="rounded-lg border border-edge-subtle bg-zinc-900/40">

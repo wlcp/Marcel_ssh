@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { JumpAuthMethod, SavedConnection, StoredKeyMeta } from '@/lib/types';
 import { DEFAULT_PORT } from '@/lib/constants';
 import * as tauri from '@/lib/tauri';
@@ -15,6 +15,7 @@ import { useConnectionStore } from '@/stores/connectionStore';
 import KeyManager from '@/components/connection/KeyManager';
 import MobileSheet from './ui/MobileSheet';
 import MobileSelect from './ui/MobileSelect';
+import GroupInput from '@/components/ui/GroupInput';
 
 interface MobileConnectionFormProps {
   open: boolean;
@@ -82,6 +83,15 @@ export default function MobileConnectionForm({
   const [hasSecret, setHasSecret] = useState(false);
   const [secretDirty, setSecretDirty] = useState(false);
   const [group, setGroup] = useState('');
+  // 已有分组来自其它连接：输入时给候选，同时仍然允许直接敲一个新分组。
+  const savedConnections = useConnectionStore((s) => s.connections);
+  const groupOptions = useMemo(
+    () =>
+      [...new Set(savedConnections.map((c) => c.group?.trim()).filter((g): g is string => !!g))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [savedConnections],
+  );
   /** Optional main credential (password or key passphrase) saved to keychain. */
   const [secret, setSecret] = useState('');
   /**
@@ -606,11 +616,11 @@ export default function MobileConnectionForm({
           ))}
 
         <Field label="分组（可选）">
-          <input
-            type="text"
+          <GroupInput
             value={group}
-            onChange={(e) => setGroup(e.target.value)}
-            placeholder="生产环境"
+            onChange={setGroup}
+            groups={groupOptions}
+            placeholder={groupOptions.length > 0 ? '选择已有分组，或直接输入新分组' : '生产环境'}
             className={inputClass}
           />
         </Field>
