@@ -24,6 +24,10 @@ interface AndroidBridgeRaw {
   isNotificationPermissionGranted(): boolean;
   /** 异步弹出系统权限对话框，结果通过 window.__marcelNotificationPermissionResult 回调 */
   requestNotificationPermission(): void;
+  /** 是否已被排除在电池优化之外（Doze 会限制未豁免应用的网络）；旧版 APK 没有 */
+  isIgnoringBatteryOptimizations?(): boolean;
+  /** 弹出「不受电池优化限制」授权框；返回是否弹出了直达框；旧版 APK 没有 */
+  requestIgnoreBatteryOptimizations?(): boolean;
   /** "ime,nav"（CSS 长度）；旧版 APK 没有这个方法，调用前必须判空 */
   getInsetBottoms?(): string;
   /** 外框底色（#RRGGBB）+ 是否浅色主题：原生据此设系统栏图标明暗与窗口底色，并记下供下次冷启动用。旧版 APK 没有 */
@@ -41,6 +45,24 @@ declare global {
 /** 是否在注入了 AndroidBridge 的环境（即 Android 端）。 */
 export function isAndroidBridgeAvailable(): boolean {
   return typeof window !== 'undefined' && !!window.AndroidBridge;
+}
+
+/**
+ * 是否已被系统排除在电池优化之外。
+ *
+ * 这条决定「切后台后网络还能不能用」：Android 6+ 的 Doze 对**未豁免**的应用限制网络，
+ * 前台服务与 WakeLock 都不豁免这一点 —— 表现就是通知还在、SSH 却在 10 分钟后被判超时。
+ * 旧版 APK 没有这个桥方法，按「已豁免」处理（不误报）。
+ */
+export function isIgnoringBatteryOptimizations(): boolean {
+  if (!isAndroidBridgeAvailable()) return true;
+  return window.AndroidBridge?.isIgnoringBatteryOptimizations?.() ?? true;
+}
+
+/** 请求加入电池优化白名单（会离开 App 去系统弹框）；返回是否弹出了直达框。 */
+export function requestIgnoreBatteryOptimizations(): boolean {
+  if (!isAndroidBridgeAvailable()) return false;
+  return window.AndroidBridge?.requestIgnoreBatteryOptimizations?.() ?? false;
 }
 
 /**

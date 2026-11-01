@@ -18,6 +18,10 @@
     <!-- 应用内更新：判断当前网络是否计量（移动数据），计量网络下不自动下载
          安装包，避免静默消耗用户流量。isActiveNetworkMetered 需要此权限。 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 后台保活：Doze 会对**未豁免电池优化**的应用限制网络（前台服务也不行），
+         结果是 SSH keepalive 发不出去、10 分钟后被判超时踢下线。
+         这条权限用于请求加入「不受电池优化限制」白名单。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

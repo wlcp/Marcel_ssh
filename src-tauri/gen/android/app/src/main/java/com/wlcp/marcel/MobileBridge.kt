@@ -39,6 +39,51 @@ class MobileBridge(private val activity: MainActivity) {
         MarcelForegroundService.update(activity, title, body)
     }
 
+    // ---------- 电池优化豁免（Doze 会掐断前台服务的网络） ----------
+
+    /**
+     * 本应用是否已被排除在电池优化之外（= 后台不被 Doze 限制网络）。
+     * Android 6 以下没有 Doze，直接视为已豁免。
+     */
+    @JavascriptInterface
+    fun isIgnoringBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        return try {
+            val pm = activity.getSystemService(android.content.Context.POWER_SERVICE)
+                as android.os.PowerManager
+            pm.isIgnoringBatteryOptimizations(activity.packageName)
+        } catch (e: Exception) {
+            android.util.Log.w("MarcelBridge", "isIgnoringBatteryOptimizations failed: $e")
+            false
+        }
+    }
+
+    /**
+     * 弹出系统的「不受电池优化限制」授权框。
+     * 部分 ROM 不支持 ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS，退回到电池优化列表页。
+     * 返回 true = 弹出了直达授权框；false = 只打开了列表页（需要用户自己找本应用）。
+     */
+    @JavascriptInterface
+    fun requestIgnoreBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        return try {
+            val intent = android.content.Intent(
+                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+            ).setData(android.net.Uri.parse("package:" + activity.packageName))
+            activity.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            try {
+                activity.startActivity(
+                    android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                )
+            } catch (_: Exception) {
+                /* 极端受限的 ROM：连列表页都打不开，调用方按失败提示 */
+            }
+            false
+        }
+    }
+
     // ---------- Agent 事件通知 ----------
 
     /**
