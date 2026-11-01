@@ -1695,6 +1695,16 @@ export async function pluginInstall(
 }
 
 /** Abort a running plugin install (download or extraction). */
+/**
+ * 重启整个应用（插件装/卸后让注入类改动生效）。
+ *
+ * Tauri v2 的 `app.restart()` 会重新拉起进程；调用后当前 JS 上下文不再可靠，
+ * 所以调用方不要在这个 Promise 之后继续做 UI 操作。
+ */
+export async function restartApp(): Promise<void> {
+  return invoke("app_restart");
+}
+
 export async function pluginInstallCancel(installId: string): Promise<void> {
   return invoke("plugin_install_cancel", { installId });
 }

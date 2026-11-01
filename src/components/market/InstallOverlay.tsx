@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { AlertTriangle, Check, Package, Trash2, X } from 'lucide-react';
 import { useAnimatedPresence } from '@/hooks/useAnimatedPresence';
 import Button from '@/components/ui/Button';
+import { restartApp } from '@/lib/tauri';
 
 /** 覆盖层状态机。 */
 export type InstallOverlayStatus =
@@ -154,9 +155,21 @@ export default function InstallOverlay({
         </p>
       );
       footer = (
-        <Button variant="primary" size="sm" onClick={onClose}>
-          知道了
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            稍后
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              // 注入类插件要在主窗口加载时挂上，重启是最省事也最一致的生效方式。
+              void restartApp().catch(() => onClose());
+            }}
+          >
+            立即重启
+          </Button>
+        </div>
       );
       break;
     case 'cancelled':

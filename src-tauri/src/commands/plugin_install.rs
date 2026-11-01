@@ -624,13 +624,18 @@ pub async fn plugin_install(
     };
 
     // 更新 registry（内存与磁盘保持一致，已卸载插件实时从后端移除），
-    // 但不 emit `plugin-registry-changed`——前端不自动刷新，重启后生效。
+    // 并广播 `plugin-registry-changed`：至少让「设置 → 插件」立刻看到新装的条目
+    // （能不能马上用取决于它是否注入主窗口——注入类仍要重启，覆盖层会写清楚）。
     let config_dir = state.config_dir.clone();
     let settings = state.settings.read().await.clone();
     let app_version = app.package_info().version.to_string();
-    {
+    let diff = {
         let mut reg = state.plugin_registry.write().await;
-        reg.reload(&config_dir, &settings, &app_version).await;
+        reg.reload(&config_dir, &settings, &app_version).await
+    };
+    {
+        use tauri::Emitter;
+        let _ = app.emit("plugin-registry-changed", &diff);
     }
 
     let _ = emit_event(
@@ -645,6 +650,16 @@ pub async fn plugin_install(
         version: installed.2,
         restart_required: true,
     })
+}
+
+/// 重启应用（插件装/卸后让注入类改动生效）。
+///
+/// 为什么放在这里：Tauri v2 的 `AppHandle::restart` 是同步且不返回的，前端
+/// 只需要「点一下 = 真的重启」，没必要为此引入 plugin-process 依赖。
+#[tauri::command]
+pub fn app_restart(app: tauri::AppHandle) {
+    log::info!("app_restart: 用户请求重启（插件安装后生效）");
+    app.restart();
 }
 
 /// Update an installed plugin (mirror-first, preserve user data).
