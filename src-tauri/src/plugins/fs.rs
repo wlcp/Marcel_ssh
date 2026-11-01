@@ -71,15 +71,21 @@ pub fn resolve_read_path(
     let file_path = match candidate.canonicalize() {
         Ok(p) => p,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // 文件不存在：校验父目录（必须存在且在插件目录内），路径原样交给调用方。
-            let parent = candidate.parent().unwrap_or(&candidate);
-            let canonical_parent = parent
-                .canonicalize()
-                .map_err(|_| AppError::Other(format!("path not found: {}", path)))?;
-            if !canonical_parent.starts_with(&base_dir) {
-                return Err(AppError::Other("path traversal rejected".into()));
+            // 文件不存在——**可能连父目录都还不存在**（长期记忆插件第一次读
+            // `memories/<host>.jsonl` 就是这样：`memories/` 要等第一次写入才建）。
+            // 所以向上找第一个真实存在的祖先：它必须落在插件目录内，路径原样返回，
+            // 由调用方把 NotFound 当空内容。
+            let mut ancestor = candidate.parent();
+            while let Some(dir) = ancestor {
+                if let Ok(canonical) = dir.canonicalize() {
+                    if !canonical.starts_with(&base_dir) {
+                        return Err(AppError::Other("path traversal rejected".into()));
+                    }
+                    return Ok(candidate);
+                }
+                ancestor = dir.parent();
             }
-            return Ok(candidate);
+            return Err(AppError::Other(format!("path not found: {}", path)));
         }
         Err(_) => {
             return Err(AppError::Other(format!("path not found: {}", path)));
