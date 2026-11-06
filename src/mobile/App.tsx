@@ -23,6 +23,8 @@ import { useUpdateStore } from '@/stores/updateStore';
 import { mobileSetAppForeground } from '@/lib/tauri';
 import { bootstrapMobileApp } from './bootstrap';
 import { registerBackHandler } from './backHandler';
+import { installMobileAutoReconnect } from './mobileAutoReconnect';
+import { startForegroundService } from './mobileBridge';
 import { panelVisibilityClass } from './sessionUi';
 import { DEFAULT_MOBILE_TAB, type MobileTabId } from './tabs';
 import type { MobileSettingsCategoryId } from './mobileSettingsModel';
@@ -153,6 +155,15 @@ export default function MobileApp() {
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         reportForeground(true);
+        // 回到前台顺手把保活服务重新拉一次（幂等）：进程在后台被系统回收重建后，
+        // START_STICKY 重建的服务可能还没经历一次 startForeground，这条兜底保证
+        // 只要开关是开的，前台状态下服务一定在跑。
+        if (
+          useSettingsStore.getState().settings.mobileBackgroundSettings
+            .keepAliveEnabled
+        ) {
+          startForegroundService('Marcel SSH', '运行中');
+        }
         window.dispatchEvent(new CustomEvent('mobile:foreground'));
       } else {
         reportForeground(false);
@@ -160,8 +171,11 @@ export default function MobileApp() {
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
+    // 回前台自动重连：后台期间被系统掐断的会话，不该等用户自己去点「重连」。
+    const uninstallAutoReconnect = installMobileAutoReconnect();
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      uninstallAutoReconnect();
     };
   }, []);
 

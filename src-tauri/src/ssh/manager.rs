@@ -211,9 +211,20 @@ impl SshManager {
             session_id
         );
 
+        // 保活参数按平台取：手机进后台后系统会限流（Doze / App Standby / 厂商省电策略），
+        // keepalive 包可能被推迟几十秒到几分钟才真正发出去。桌面端「600 秒收不到数据即断」
+        // 放到这种场景就是**误杀**——用户切后台再回来，正在跑的会话已经被本地判死了，
+        // 而服务器那边其实一直好着。移动端因此把阈值放宽到 1 小时（真正的死连接由
+        // TCP 写失败 / SFTP 超时兜底），同时把心跳加密到 15 秒，减少服务端 ClientAlive 超时。
+        let (inactivity_timeout, keepalive_interval) =
+            if cfg!(any(target_os = "android", target_os = "ios")) {
+                (Duration::from_secs(3600), Duration::from_secs(15))
+            } else {
+                (Duration::from_secs(600), Duration::from_secs(30))
+            };
         let client_config = Arc::new(client::Config {
-            inactivity_timeout: Some(Duration::from_secs(600)),
-            keepalive_interval: Some(Duration::from_secs(30)),
+            inactivity_timeout: Some(inactivity_timeout),
+            keepalive_interval: Some(keepalive_interval),
             nodelay: true,
             ..Default::default()
         });

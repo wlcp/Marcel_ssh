@@ -8,7 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -39,6 +41,9 @@ class MarcelForegroundService : Service() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_BODY = "body"
         const val EXTRA_NOTIFICATION_ID = "notification_id"
+
+        /** 看门狗自检间隔。30 秒足够跟上一次 keepalive 窗口（移动端 15 秒心跳）。 */
+        private const val WATCHDOG_INTERVAL_MS = 30_000L
 
         /**
          * 发送 Agent 事件通知（审批/提问/完成/失败）。
@@ -151,6 +156,22 @@ class MarcelForegroundService : Service() {
     private var lastTitle: String = "Marcel SSH"
     private var lastBody: String = "运行中"
 
+    /**
+     * 保活看门狗。每 [WATCHDOG_INTERVAL_MS] 毫秒自检一次，补回被系统悄悄收走的资源。
+     *
+     * 为什么需要：Wakelock **会被系统静默释放** —— 厂商省电策略、系统的 Wakelock 清理、
+     * 以及某些 ROM 在「深度省电」下直接回收持有中的 wakelock。释放之后 CPU 立刻可以休眠，
+     * SSH keepalive 的定时器不再触发，服务器/本地任何一侧超时都会把会话判死；
+     * 而服务本身、通知、进程统统还在，用户看到的就是「通知在、会话却断了」。
+     * 前台服务状态同样可能被降级（通知被清理后系统不再把它算作前台），
+     * 所以这里一并重新 [startForeground]（幂等，代价只是刷一次同一条通知）。
+     */
+    private var watchdog: Handler? = null
+    private var watchdogTask: Runnable? = null
+
+    /** 本服务当前是否已进过前台状态（用于区分「保活中」与「只是被借来发一条通知」）。 */
+    private var foregroundStarted = false
+
     override fun onCreate() {
         super.onCreate()
         acquireWakeLock()
@@ -159,6 +180,8 @@ class MarcelForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                foregroundStarted = false
+                stopWatchdog()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
@@ -169,8 +192,12 @@ class MarcelForegroundService : Service() {
                 val title = intent.getStringExtra(EXTRA_TITLE) ?: "Marcel SSH"
                 val body = intent.getStringExtra(EXTRA_BODY) ?: ""
                 showAgentNotification(id, title, body)
-                // 若服务原本未启动（仅被调来发通知），发完即停，避免空跑
-                if (wakeLock?.isHeld != true) {
+                // 只有在「服务本来没在前台跑」时才停（发完通知不空跑）。
+                //
+                // 这里曾经判断的是 `wakeLock?.isHeld != true` —— 那是错的：Wakelock 会被
+                // 系统静默释放，于是后台来一条 Agent 通知就能把**正在保活的服务**停掉，
+                // 会话随即被系统回收。判断前台状态才是对的。
+                if (!foregroundStarted) {
                     stopSelf()
                 }
                 return START_NOT_STICKY
@@ -180,6 +207,8 @@ class MarcelForegroundService : Service() {
                 // 前台服务通知一旦消失，系统会立即把服务降级为普通后台服务并可能杀掉，
                 // 因此必须立刻重新 startForeground 把通知贴回来，保证保活不中断。
                 startForeground(NOTIFICATION_ID_SERVICE, buildNotification(lastTitle, lastBody))
+                foregroundStarted = true
+                startWatchdog()
                 return START_STICKY
             }
             else -> {
@@ -189,9 +218,41 @@ class MarcelForegroundService : Service() {
                 lastTitle = title
                 lastBody = body
                 startForeground(NOTIFICATION_ID_SERVICE, buildNotification(title, body))
+                foregroundStarted = true
+                startWatchdog()
             }
         }
         return START_STICKY
+    }
+
+    /** 启动保活看门狗（幂等：重复 start 只保留一条循环）。 */
+    private fun startWatchdog() {
+        if (watchdogTask != null) return
+        val handler = watchdog ?: Handler(Looper.getMainLooper()).also { watchdog = it }
+        val task = object : Runnable {
+            override fun run() {
+                try {
+                    // 1) wakelock 被系统收走 → 立刻补回
+                    if (wakeLock?.isHeld != true) {
+                        android.util.Log.w("MarcelService", "看门狗：Wakelock 已丢失，重新获取")
+                        acquireWakeLock()
+                    }
+                    // 2) 前台状态被降级 → 重新 startForeground（幂等）
+                    startForeground(NOTIFICATION_ID_SERVICE, buildNotification(lastTitle, lastBody))
+                } catch (e: Exception) {
+                    // Android 12+ 后台启动限制等极端情况：记日志，下一轮再试
+                    android.util.Log.w("MarcelService", "看门狗自检失败: ${e.message}")
+                }
+                handler.postDelayed(this, WATCHDOG_INTERVAL_MS)
+            }
+        }
+        watchdogTask = task
+        handler.postDelayed(task, WATCHDOG_INTERVAL_MS)
+    }
+
+    private fun stopWatchdog() {
+        watchdogTask?.let { watchdog?.removeCallbacks(it) }
+        watchdogTask = null
     }
 
     /**
@@ -276,6 +337,7 @@ class MarcelForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        stopWatchdog()
         releaseWakeLock()
         super.onDestroy()
     }
