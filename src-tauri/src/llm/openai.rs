@@ -15,6 +15,14 @@ use crate::llm::streaming::StreamEvent;
 pub struct OpenAiProvider {
     config: LlmConfig,
     client: reqwest::Client,
+    /// 直连客户端（不走系统代理），仅桌面存在。
+    ///
+    /// 桌面端的 reqwest 启用了 `system-proxy` feature（插件市场要用），于是**LLM 请求也
+    /// 会跟着系统代理走**。Clash 这类工具的分流规则经常把国内 API 一并代理出境，
+    /// 表现就是 `peer closed connection without sending TLS close_notify` / unexpected-eof：
+    /// TLS 握手成功、请求一发出对端就断。同一个代理访问 opencode.ai 却完全正常，
+    /// 于是看起来像「只有某些渠道坏了」。这里留一个直连客户端做逐请求回退。
+    direct_client: Option<reqwest::Client>,
 }
 
 /// 流式文本回调（用于压缩摘要等内嵌 LLM 调用）。
@@ -57,6 +65,43 @@ fn insert_header(map: &mut HeaderMap, name: &str, value: &str) -> Result<(), Llm
     Ok(())
 }
 
+/// 已经确认「走直连才通」的 host 集合。
+///
+/// 桌面端的 reqwest 默认跟随系统代理；Clash 一类工具的分流规则经常把国内 API 也代理出境，
+/// 表现就是对端 TLS 直接断（`close_notify` / unexpected-eof）。回退到直连成功后把 host 记下来，
+/// 后续同一渠道的每个请求都不必再白撞一次代理。
+fn direct_preference() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static PREF: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    PREF.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+fn host_of(url: &str) -> Option<String> {
+    reqwest::Url::parse(url)
+        .ok()?
+        .host_str()
+        .map(str::to_string)
+}
+
+fn prefers_direct(url: &str) -> bool {
+    let Some(host) = host_of(url) else {
+        return false;
+    };
+    direct_preference()
+        .lock()
+        .map(|set| set.contains(&host))
+        .unwrap_or(false)
+}
+
+fn remember_direct(url: &str) {
+    let Some(host) = host_of(url) else {
+        return;
+    };
+    if let Ok(mut set) = direct_preference().lock() {
+        set.insert(host);
+    }
+}
+
 impl OpenAiProvider {
     pub fn new(mut config: LlmConfig) -> Result<Self, LlmError> {
         // 会话头是「每会话稳定 ID」：漏注入时兜底一个随机 ID，
@@ -79,7 +124,24 @@ impl OpenAiProvider {
             .build()
             .map_err(|e| LlmError::Config(format!("HTTP 客户端初始化失败: {}", e)))?;
 
-        Ok(Self { config, client })
+        // 桌面才有 system-proxy 差异；Android 的 reqwest 没开这个 feature，
+        // 两个客户端会完全等价，没必要多留一份。
+        #[cfg(not(target_os = "android"))]
+        let direct_client = Some(
+            reqwest::Client::builder()
+                .pool_idle_timeout(Duration::from_secs(60))
+                .no_proxy()
+                .build()
+                .map_err(|e| LlmError::Config(format!("HTTP 直连客户端初始化失败: {}", e)))?,
+        );
+        #[cfg(target_os = "android")]
+        let direct_client = None;
+
+        Ok(Self {
+            config,
+            client,
+            direct_client,
+        })
     }
 
     pub fn config(&self) -> &LlmConfig {
@@ -315,6 +377,28 @@ impl OpenAiProvider {
         )
     }
 
+    /// 这次失败是否属于「连接被对端直接掐断」——代理/中间盒最典型的表现。
+    ///
+    /// reqwest 的 `Display` 只有最外层一句，`close_notify` / `unexpected-eof` 这些
+    /// 关键线索藏在整个 `source()` 链里，所以这里把链路拼起来再判断。
+    fn looks_like_peer_closed(err: &reqwest::Error) -> bool {
+        use std::error::Error as _;
+        let mut chain = String::new();
+        let mut cursor: Option<&(dyn std::error::Error + 'static)> =
+            Some(err as &(dyn std::error::Error + 'static));
+        while let Some(item) = cursor {
+            chain.push_str(&item.to_string());
+            chain.push(' ');
+            cursor = item.source();
+        }
+        let chain = chain.to_lowercase();
+        chain.contains("close_notify")
+            || chain.contains("unexpected-eof")
+            || chain.contains("connection reset")
+            || chain.contains("broken pipe")
+            || err.is_connect()
+    }
+
     async fn send_llm_request(
         &self,
         url: &str,
@@ -333,32 +417,77 @@ impl OpenAiProvider {
 
         // 只包「等响应头」这一段——reqwest 的逐请求 .timeout() 会连 body 一起覆盖，
         // 这里必须用 tokio timeout 把 .send() 单独圈住，流式 body 不受限。
-        let sent = tokio::time::timeout(
-            first_byte_timeout,
-            self.client
+        let headers = self.build_headers()?;
+        let build = |client: &reqwest::Client, body: Vec<u8>| {
+            client
                 .post(url)
-                .headers(self.build_headers()?)
+                .headers(headers.clone())
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(body_bytes)
-                .send(),
-        )
-        .await;
-
-        let response = match sent {
-            Ok(r) => r.map_err(|e| {
-                let detail = format_reqwest_error(&e);
-                log::error!("LLM 请求发送失败: {}", detail);
-                LlmError::Network(detail)
-            })?,
-            Err(_) => {
-                return Err(LlmError::Timeout {
-                    detail: format!(
-                        "首字超时（{}s 内未收到模型响应）",
-                        self.config.first_byte_timeout_secs
-                    ),
-                });
-            }
+                .body(body)
+                .send()
         };
+
+        // 先走谁：某个 host 之前已经证明「走直连才通」就直接直连，
+        // 免得每次请求都先撞一次代理失败（多一个 TLS 往返 + 一堆日志噪音）。
+        let prefer_direct = self.direct_client.is_some() && prefers_direct(url);
+        let first: &reqwest::Client = if prefer_direct {
+            self.direct_client.as_ref().expect("prefer_direct 已确认直连存在")
+        } else {
+            &self.client
+        };
+        let second: Option<&reqwest::Client> = if prefer_direct {
+            Some(&self.client)
+        } else {
+            self.direct_client.as_ref()
+        };
+
+        let timeout_reason = || LlmError::Timeout {
+            detail: format!(
+                "首字超时（{}s 内未收到模型响应）",
+                self.config.first_byte_timeout_secs
+            ),
+        };
+
+        let sent = match tokio::time::timeout(first_byte_timeout, build(first, body_bytes.clone()))
+            .await
+        {
+            Ok(Ok(resp)) => Ok(resp),
+            Ok(Err(err)) if second.is_some() && Self::looks_like_peer_closed(&err) => {
+                let alt = second.expect("second 已判空");
+                log::warn!(
+                    "LLM 请求失败（{}），改用{}重试: {}",
+                    format_reqwest_error(&err),
+                    if prefer_direct { "系统代理" } else { "直连" },
+                    url
+                );
+                match tokio::time::timeout(first_byte_timeout, build(alt, body_bytes)).await {
+                    Ok(Ok(resp)) => {
+                        // 代理不通、直连通：记住这个 host，下次直接走直连。
+                        if !prefer_direct {
+                            remember_direct(url);
+                        }
+                        Ok(resp)
+                    }
+                    Ok(Err(err)) => Err(err),
+                    Err(_) => return Err(timeout_reason()),
+                }
+            }
+            Ok(Err(err)) => Err(err),
+            Err(_) => return Err(timeout_reason()),
+        };
+
+        let response = sent.map_err(|e| {
+            let detail = format_reqwest_error(&e);
+            log::error!("LLM 请求发送失败: {}", detail);
+            // 两条路径都试过了：说明不是「系统代理把连接截断」这一种可能，
+            // 得让用户知道系统已经试过另一条，别再让他反复切代理。
+            let detail = if self.direct_client.is_some() {
+                format!("{detail}（已自动在「系统代理」与「直连」两条路径上各试一次）")
+            } else {
+                detail
+            };
+            LlmError::Network(detail)
+        })?;
 
         let status = response.status();
         if !status.is_success() {
@@ -377,21 +506,63 @@ impl OpenAiProvider {
         let url = self.models_endpoint();
         log::info!("LLM 列出模型请求: {}", url);
 
-        let response = self
-            .client
-            .get(&url)
-            // 非流式短请求：逐请求设总超时（覆盖 body 读取），口径同 JEV。
-            .timeout(Duration::from_secs(
-                self.config.first_byte_timeout_secs.clamp(20, 250),
-            ))
-            .headers(self.build_headers()?)
-            .send()
-            .await
-            .map_err(|e| {
-                let detail = format_reqwest_error(&e);
-                log::error!("LLM 列出模型请求失败: {}", detail);
-                LlmError::Network(detail)
-            })?;
+        let timeout = Duration::from_secs(self.config.first_byte_timeout_secs.clamp(20, 250));
+        let headers = self.build_headers()?;
+        let build = |client: &reqwest::Client| {
+            client
+                .get(&url)
+                // 非流式短请求：逐请求设总超时（覆盖 body 读取），口径同 JEV。
+                .timeout(timeout)
+                .headers(headers.clone())
+                .send()
+        };
+
+        // 与聊天请求同一套顺序策略：优先走已证明可用的那条路径。
+        let prefer_direct = self.direct_client.is_some() && prefers_direct(&url);
+        let first: &reqwest::Client = if prefer_direct {
+            self.direct_client.as_ref().expect("prefer_direct 已确认直连存在")
+        } else {
+            &self.client
+        };
+
+        let sent = match build(first).await {
+            Ok(resp) => Ok(resp),
+            Err(err) if Self::looks_like_peer_closed(&err) => {
+                let alt = if prefer_direct {
+                    Some(&self.client)
+                } else {
+                    self.direct_client.as_ref()
+                };
+                match alt {
+                    Some(alt) => {
+                        log::warn!(
+                            "列出模型请求失败（{}），改用{}重试: {}",
+                            format_reqwest_error(&err),
+                            if prefer_direct { "系统代理" } else { "直连" },
+                            url
+                        );
+                        let retried = build(alt).await;
+                        if retried.is_ok() && !prefer_direct {
+                            remember_direct(&url);
+                        }
+                        retried
+                    }
+                    None => Err(err),
+                }
+            }
+            Err(err) => Err(err),
+        };
+
+        let response = sent.map_err(|e| {
+            let detail = format_reqwest_error(&e);
+            log::error!("LLM 列出模型请求失败: {}", detail);
+            let detail = if self.direct_client.is_some() {
+                format!("{detail}（已自动在「系统代理」与「直连」两条路径上各试一次）")
+            } else {
+                detail
+            };
+            LlmError::Network(detail)
+        })?;
 
         let status = response.status();
         if !status.is_success() {
