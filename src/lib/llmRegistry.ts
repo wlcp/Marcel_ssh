@@ -189,6 +189,9 @@ export function createChannel(name: string, baseUrl: string, preset = ''): Chann
     apiKey: '',
     enabled: true,
     preset,
+    // 必须显式给空对象：缺字段时后端 serde 虽然能兜底，但前端内部有地方
+    // 会直接 Object.entries(channel.headers)，缺了就是静默丢头。
+    headers: {},
     sessionHeader: '',
     modelsUrl: '',
   };

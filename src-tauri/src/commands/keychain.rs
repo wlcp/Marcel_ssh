@@ -93,7 +93,16 @@ pub async fn config_save_llm_channel_api_key(
     channel_id: String,
     api_key: String,
 ) -> Result<(), AppError> {
-    keychain::set(&SecretSlot::LlmChannel(channel_id), &api_key)?;
+    // trim 掉首尾空白：从网页复制 Key 常带结尾换行，存进密钥链后拼进
+    // `Authorization: Bearer …` 会让 HTTP 头校验失败，报成「API key 含非法字符」，
+    // 用户根本猜不到是自己多复制了一个换行。空值直接拒绝，避免存一个假 Key。
+    let trimmed = api_key.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Config(
+            "API Key 不能为空（如需清除，请用删除按钮）".into(),
+        ));
+    }
+    keychain::set(&SecretSlot::LlmChannel(channel_id), trimmed)?;
     Ok(())
 }
 

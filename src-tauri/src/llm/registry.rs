@@ -108,7 +108,10 @@ pub struct ChannelConfig {
     #[serde(default)]
     pub preset: String,
     /// 静态附加请求头（如归属标识）。**会随设置同步，禁止放密钥。**
-    #[serde(default)]
+    /// 静态附加请求头。`null` 与缺字段一样按空表处理——旧配置/同步来的文档里
+    /// 可能真的写着 `"headers": null`，用默认的 `#[serde(default)]` 会整份反序列化失败，
+    /// 表现成「保存设置：invalid type: null」，与真正的配置问题毫无关系。
+    #[serde(default, deserialize_with = "deserialize_headers_or_null")]
     pub headers: std::collections::BTreeMap<String, String>,
     /// 每请求注入「本会话稳定 ID」的头名（如 `x-opencode-session`），空 = 不注入。
     #[serde(default)]
@@ -116,6 +119,16 @@ pub struct ChannelConfig {
     /// 模型列表端点覆写，空 = `{base_url}/models`。
     #[serde(default)]
     pub models_url: String,
+}
+
+fn deserialize_headers_or_null<'de, D>(
+    deserializer: D,
+) -> Result<std::collections::BTreeMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<std::collections::BTreeMap<String, String>>::deserialize(deserializer)?
+        .unwrap_or_default())
 }
 
 impl Default for ChannelConfig {

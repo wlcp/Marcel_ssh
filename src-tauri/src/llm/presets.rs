@@ -22,6 +22,68 @@ pub struct ChannelPresetInfo {
 }
 
 pub const CHANNEL_PRESETS: &[ChannelPresetInfo] = &[
+    // ── 通用 OpenAI 兼容服务 ──
+    //
+    // 这些不是「特殊协议」，只是手填容易错的三件套：Base URL 要不要带 `/v1`、
+    // 模型列表在 `/models` 还是别处、模型名该写什么。预设把前两件填好，
+    // 用户点一下就能「获取模型列表」挑模型——比让他对着文档猜端点友好得多。
+    ChannelPresetInfo {
+        id: "deepseek",
+        name: "DeepSeek 官方",
+        base_url: "https://api.deepseek.com/v1",
+        models_url: "https://api.deepseek.com/v1/models",
+        session_header: "",
+        note: "官方兼容端点。模型名用 deepseek-chat（通用对话）或 deepseek-reasoner（推理）。差一个字母就会 400 Model Not Exist。",
+    },
+    ChannelPresetInfo {
+        id: "openai",
+        name: "OpenAI 官方",
+        base_url: "https://api.openai.com/v1",
+        models_url: "https://api.openai.com/v1/models",
+        session_header: "",
+        note: "官方端点。国内网络通常需要代理，走系统代理设置。",
+    },
+    ChannelPresetInfo {
+        id: "moonshot",
+        name: "Moonshot (Kimi)",
+        base_url: "https://api.moonshot.cn/v1",
+        models_url: "https://api.moonshot.cn/v1/models",
+        session_header: "",
+        note: "国内直连。模型名如 kimi-k2-0905-preview。",
+    },
+    ChannelPresetInfo {
+        id: "siliconflow",
+        name: "硅基流动",
+        base_url: "https://api.siliconflow.cn/v1",
+        models_url: "https://api.siliconflow.cn/v1/models",
+        session_header: "",
+        note: "聚合多家开源模型，模型名形如 deepseek-ai/DeepSeek-V3。",
+    },
+    ChannelPresetInfo {
+        id: "dashscope",
+        name: "阿里云百炼",
+        base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        models_url: "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+        session_header: "",
+        note: "走 compatible-mode 端点（不是 dashscope 原生协议）。模型名如 qwen-plus。",
+    },
+    ChannelPresetInfo {
+        id: "zhipu",
+        name: "智谱 GLM",
+        base_url: "https://open.bigmodel.cn/api/paas/v4",
+        models_url: "https://open.bigmodel.cn/api/paas/v4/models",
+        session_header: "",
+        note: "v4 兼容端点。模型名如 glm-4.6。",
+    },
+    ChannelPresetInfo {
+        id: "groq",
+        name: "Groq",
+        base_url: "https://api.groq.com/openai/v1",
+        models_url: "https://api.groq.com/openai/v1/models",
+        session_header: "",
+        note: "低延迟推理。模型名如 llama-3.3-70b-versatile。",
+    },
+    // ── 需要额外协议细节的服务 ──
     ChannelPresetInfo {
         id: "opencode-go",
         name: "OpenCode Go",
@@ -57,7 +119,9 @@ pub fn apply_to_channel(channel: &mut ChannelConfig) {
     if channel.models_url.trim().is_empty() {
         channel.models_url = preset.models_url.to_string();
     }
-    if channel.session_header.trim().is_empty() {
+    // 只有预设真的要求会话头时才写：通用供应商的 session_header 是空串，
+    // 写进去等于给渠道留了个「空头名」，将来手改时更容易误配。
+    if !preset.session_header.trim().is_empty() && channel.session_header.trim().is_empty() {
         channel.session_header = preset.session_header.to_string();
     }
 }
@@ -128,6 +192,36 @@ mod tests {
             effective_models_url(&c).as_deref(),
             Some("https://opencode.ai/inference/v1/models")
         );
+    }
+
+    #[test]
+    fn common_vendor_presets_fill_endpoints_without_session_header() {
+        for id in [
+            "deepseek",
+            "openai",
+            "moonshot",
+            "siliconflow",
+            "dashscope",
+            "zhipu",
+            "groq",
+        ] {
+            let mut c = ChannelConfig {
+                preset: id.into(),
+                ..Default::default()
+            };
+            apply_to_channel(&mut c);
+            assert!(
+                c.base_url.starts_with("https://"),
+                "{id} 预设必须带 https 端点"
+            );
+            assert!(c.models_url.ends_with("/models"), "{id} 预设必须带模型列表端点");
+            assert!(
+                c.session_header.is_empty(),
+                "{id} 不需要会话头，不该被塞空头名以外的值"
+            );
+            assert_eq!(effective_session_header(&c), "");
+            assert_eq!(effective_models_url(&c), Some(c.models_url.clone()));
+        }
     }
 
     #[test]

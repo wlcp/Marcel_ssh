@@ -122,9 +122,22 @@ impl OpenAiProvider {
             HeaderValue::from_str(&user_agent)
                 .map_err(|e| LlmError::Config(format!("User-Agent 非法: {}", e)))?,
         );
-        let auth = format!("Bearer {}", self.config.api_key);
-        let auth_header = HeaderValue::from_str(&auth)
-            .map_err(|e| LlmError::Config(format!("API key 含非法字符: {}", e)))?;
+        // 先 trim：从网页复制 Key 经常带上结尾换行或不可见空白，
+        // 直接拼进 Authorization 会让 HeaderValue 校验失败，报出一句
+        // 「API key 含非法字符」——用户完全看不出是自己多复制了一个换行。
+        let api_key = self.config.api_key.trim();
+        if api_key.is_empty() {
+            return Err(LlmError::Config(
+                "未配置 API Key，请先在渠道设置里填写".into(),
+            ));
+        }
+        let auth = format!("Bearer {}", api_key);
+        let auth_header = HeaderValue::from_str(&auth).map_err(|e| {
+            LlmError::Config(format!(
+                "API Key 里有 HTTP 头不允许的字符（常见是换行、制表符或全角空格），请重新粘贴: {}",
+                e
+            ))
+        })?;
         headers.insert(AUTHORIZATION, auth_header);
 
         // 渠道静态头（归属标识等）。
@@ -383,6 +396,18 @@ impl OpenAiProvider {
         let status = response.status();
         if !status.is_success() {
             let body = read_error_body(response).await;
+            // 空响应体时把实际请求的 URL 带出来：手填渠道最常见的错就是 Base URL
+            // 少了 /v1（或模型列表挂在别的路径上），此时上游往往只回一个光秃秃的 404，
+            // 用户对着「LLM 返回错误 404: 」完全不知道该改哪里。
+            let body = if body.trim().is_empty() {
+                format!(
+                    "（请求 {} 返回 {}，响应体为空；检查 Base URL 是否少了 /v1）",
+                    url,
+                    status.as_u16()
+                )
+            } else {
+                body
+            };
             return Err(LlmError::HttpStatus {
                 status: status.as_u16(),
                 body,
