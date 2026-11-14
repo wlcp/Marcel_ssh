@@ -1,15 +1,15 @@
 {
-    "version": "1.11.14",
-    "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.14",
-    "installer_url": "https://github.com/wlcp/Marcel_ssh/releases/download/v1.11.14/Marcel-SSH-Self_1.11.14_x64-setup.exe",
-    "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUTW1EMkZVaUpSQU42SFhvMFJGeWUvcncvclU1TXdvTVBXaXFHSkkvUyttSTF6akRtTHRpekJ6V2E3a1VBMEJyNXB5MHpVbXZlVHFnZUdESU51VWFMNGxTNTZjOHRkR1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjM0OTEyCWZpbGU6TWFyY2VsIFNTSCBTZWxmXzEuMTEuMTRfeDY0LXNldHVwLmV4ZQpkMFoyMXdpUjJvdUFOMlFzelpPK25tejV2UGJhRXRiWVhLUlM1UWxnRXBpZkJqdXBQYVhkakFGT3E3UFRiZ2NzeFdFaGxPTlEzb005YllsVUs3K05CZz09Cg==",
-    "sha256": "a4bec55c5fa7837fed6b0e4fd6dc3bc79aa8f39395ec167c1727acb7ac6b90c8",
-    "size": 13868247,
+    "version": "1.11.15",
+    "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.15",
+    "installer_url": "https://github.com/wlcp/Marcel_ssh/releases/download/v1.11.15/Marcel-SSH-Self_1.11.15_x64-setup.exe",
+    "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUTW1EMkZVaUpSQVBQOGhoMHBORUdoZHp6YlRvaVdIcWpJRnJLQ0xkZVlibzA5TFNVQlhUV2VLNy9TdFQwdHVuYVNYK1lZTGYyZmVVZ3VnRTd1c01SbkRHd0JiUUNUSndrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0NjM2ODUzCWZpbGU6TWFyY2VsIFNTSCBTZWxmXzEuMTEuMTVfeDY0LXNldHVwLmV4ZQpwc0lqKzg4SU1XYkNUSnFCUURnaDFMcGhoV210TWFZK3FDWWtOeFZPQU0vKzgxZkpLeGxEanIrQU9QOVJGYjZGQkNYQURTK3pjcExHK0UrQWJ0Y1pEZz09Cg==",
+    "sha256": "b6e0d925863e13b612cb5beaf17857430d70889f5cd55afeb7d3a84af9f440cc",
+    "size": 13869702,
     "android": {
-        "version": "1.11.14",
-        "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.14",
-        "installer_url": "https://github.com/wlcp/Marcel_ssh/releases/download/v1.11.14/Marcel-SSH-Self_1.11.14_arm64.apk",
-        "sha256": "f2697ac0d2804b77012e3f38e4f60e5fe9f9371616ef6d96552ca94d96983618",
-        "size": 32557495
+        "version": "1.11.15",
+        "release_url": "https://github.com/wlcp/Marcel_ssh/releases/tag/v1.11.15",
+        "installer_url": "https://github.com/wlcp/Marcel_ssh/releases/download/v1.11.15/Marcel-SSH-Self_1.11.15_arm64.apk",
+        "sha256": "5ecf794810d51dce7448daf36404049e3df498b0fd804638a204a50dddc7893a",
+        "size": 32564199
     }
 }
