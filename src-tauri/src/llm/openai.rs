@@ -172,7 +172,9 @@ impl OpenAiProvider {
 
     fn build_headers(&self) -> Result<HeaderMap, LlmError> {
         let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        // Content-Type 不在这里设：本函数同时服务 `GET /models`（没有 body，
+        // 带一个 JSON 类型头只会让严格的网关挑刺）。POST 由调用方在构造请求时
+        // 精确地加一次——见 `send_llm_request`。
         // 自报身份：reqwest 默认不发 User-Agent，部分渠道（OpenCode Go）
         // 明确要求客户端标识自己，而不是匿名 HTTP 库。
         let user_agent = format!(
@@ -418,11 +420,17 @@ impl OpenAiProvider {
         // 只包「等响应头」这一段——reqwest 的逐请求 .timeout() 会连 body 一起覆盖，
         // 这里必须用 tokio timeout 把 .send() 单独圈住，流式 body 不受限。
         let headers = self.build_headers()?;
+        // Content-Type 全流程**只在这一处**设置（`build_headers()` 故意不设它）。
+        //
+        // 两处都设就会出事：reqwest 的 `header()` 是 `HeaderMap::append`，最终报文里是
+        // `application/json, application/json`（一个头两个值）。宽松网关（OpenCode）照收，
+        // 严格的（DeepSeek）直接回 `415 Expected request with Content-Type: application/json`。
         let build = |client: &reqwest::Client, body: Vec<u8>| {
             client
                 .post(url)
                 .headers(headers.clone())
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                // 全流程只有这一处设置 Content-Type，保证请求里恰好是一个值。
+                .header(CONTENT_TYPE, "application/json")
                 .body(body)
                 .send()
         };
@@ -2137,9 +2145,19 @@ mod wire_bytes_tests {
             head.starts_with("post /v1/chat/completions"),
             "请求行不符: {head}"
         );
+        let content_type_lines: Vec<&str> = head
+            .lines()
+            .filter(|l| l.starts_with("content-type:"))
+            .collect();
+        // 恰好一个：两处都设 Content-Type 时 reqwest 会 append 成
+        // `application/json, application/json`，严格网关（DeepSeek）直接 415。
+        assert_eq!(
+            content_type_lines.len(),
+            1,
+            "Content-Type 只能有一个（重复会让严格网关回 415）: {head}"
+        );
         assert!(
-            head.lines()
-                .any(|l| l.starts_with("content-type:") && l.contains("application/json")),
+            content_type_lines[0].contains("application/json"),
             "Content-Type 必须仍是 application/json: {head}"
         );
         assert_eq!(
